@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SplitNaira — Split Creation Flow</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --gold: #C9922A;
+    --gold-light: #F5C842;
+    --gold-pale: #FDF3DC;
+    --green-deep: #1A4A2E;
+    --green-mid: #2D7A4F;
+    --green-light: #E8F5EE;
+    --cream: #FAF8F3;
+    --ink: #1A1A18;
+    --muted: #6B6B60;
+    --border: rgba(201,146,42,0.2);
+    --radius: 14px;
+  }
+
+  body { font-family: 'DM Sans', sans-serif; background: var(--cream); color: var(--ink); }
+
+  .app {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 4rem;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 2.5rem;
+  }
+
+  .logo {
+    width: 40px; height: 40px;
+    background: var(--green-deep);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .logo::before {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    background: var(--gold-light);
+    border-radius: 50%;
+    top: 4px; left: 4px;
+    opacity: 0.9;
+  }
+
+  .logo::after {
+    content: '';
+    position: absolute;
+    width: 16px; height: 16px;
+    background: var(--green-mid);
+    border-radius: 50%;
+    bottom: 2px; right: 2px;
+  }
+
+  .logo-text { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px; color: var(--green-deep); letter-spacing: -0.5px; }
+  .logo-text span { color: var(--gold); }
+
+  .steps-bar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2.5rem;
+    background: white;
+    border: 0.5px solid var(--border);
+    border-radius: 50px;
+    padding: 6px;
+    width: fit-content;
+  }
+
+  .step-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 16px;
+    border-radius: 50px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.25s;
+    white-space: nowrap;
+  }
+
+  .step-pill.active { background: var(--green-deep); color: white; }
+  .step-pill.done { color: var(--green-mid); }
+
+  .step-num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .step-pill.active .step-num { background: var(--gold-light); color: var(--green-deep); }
+  .step-pill:not(.active) .step-num { background: rgba(0,0,0,0.08); color: var(--muted); }
+  .step-pill.done .step-num { background: var(--green-light); color: var(--green-mid); }
+
+  .panel { display: none; }
+  .panel.active { display: block; animation: fadeUp 0.3s ease; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--green-deep);
+    margin-bottom: 4px;
+    letter-spacing: -0.3px;
+  }
+
+  .section-sub {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 1.75rem;
+  }
+
+  .card {
+    background: white;
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .field-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+
+  .field-input {
+    width: 100%;
+    background: var(--cream);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 14px;
+    font-size: 15px;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .field-input:focus { border-color: var(--gold); }
+
+  .type-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 1.25rem;
+  }
+
+  .type-btn {
+    padding: 14px 10px;
+    border-radius: 12px;
+    border: 1.5px solid var(--border);
+    background: white;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .type-btn:hover { border-color: var(--gold); background: var(--gold-pale); }
+  .type-btn.selected { border-color: var(--gold); background: var(--gold-pale); }
+
+  .type-icon { font-size: 22px; margin-bottom: 4px; }
+  .type-name { font-size: 12px; font-weight: 500; color: var(--green-deep); }
+
+  .collaborator-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 80px 36px;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 10px;
+    animation: fadeUp 0.2s ease;
+  }
+
+  .pct-input-wrap { position: relative; }
+
+  .pct-input-wrap input {
+    width: 100%;
+    background: var(--cream);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 28px 11px 14px;
+    font-size: 15px;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .pct-input-wrap input:focus { border-color: var(--gold); }
+
+  .pct-symbol {
+    position: absolute;
+    right: 10px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .remove-btn {
+    width: 36px; height: 44px;
+    border: 1px solid rgba(220,50,50,0.2);
+    border-radius: 10px;
+    background: rgba(220,50,50,0.05);
+    color: #c03030;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+
+  .remove-btn:hover { background: rgba(220,50,50,0.12); }
+
+  .add-collab-btn {
+    width: 100%;
+    padding: 11px;
+    border: 1.5px dashed var(--border);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--green-mid);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: all 0.2s;
+    margin-top: 4px;
+  }
+
+  .add-collab-btn:hover { border-color: var(--gold); background: var(--gold-pale); color: var(--gold); }
+
+  .split-meter { margin-top: 1.5rem; }
+
+  .split-bar-bg {
+    height: 10px;
+    background: rgba(0,0,0,0.06);
+    border-radius: 50px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+
+  .split-bar-fill {
+    height: 100%;
+    border-radius: 50px;
+    background: linear-gradient(90deg, var(--green-mid), var(--gold-light));
+    transition: width 0.3s ease;
+  }
+
+  .split-bar-fill.over { background: linear-gradient(90deg, #c03030, #e06060); }
+
+  .split-info { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .split-total { font-weight: 500; color: var(--ink); }
+  .split-total.over { color: #c03030; }
+  .split-total.ok { color: var(--green-mid); }
+
+  .col-labels {
+    display: grid;
+    grid-template-columns: 1fr 1fr 80px 36px;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+
+  .col-label { font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.7px; }
+
+  .review-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 0.5px solid var(--border);
+  }
+
+  .review-item:last-child { border-bottom: none; }
+
+  .review-avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--green-light);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--green-deep);
+    flex-shrink: 0;
+  }
+
+  .review-name { font-size: 14px; font-weight: 500; color: var(--ink); }
+  .review-role { font-size: 12px; color: var(--muted); }
+  .review-pct { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--gold); }
+  .review-bar-wrap { height: 4px; background: rgba(0,0,0,0.06); border-radius: 50px; margin-top: 4px; }
+  .review-bar { height: 4px; border-radius: 50px; background: var(--gold); }
+
+  .review-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 1rem; }
+
+  .meta-box { background: var(--green-light); border-radius: 12px; padding: 14px; }
+  .meta-label { font-size: 11px; font-weight: 500; color: var(--green-mid); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 4px; }
+  .meta-val { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: var(--green-deep); }
+
+  .nav-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 1.75rem;
+  }
+
+  .btn-back {
+    padding: 11px 22px;
+    border: 1.5px solid var(--border);
+    border-radius: 50px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: all 0.2s;
+  }
+
+  .btn-back:hover { border-color: var(--gold); color: var(--ink); }
+
+  .btn-next {
+    padding: 12px 28px;
+    border-radius: 50px;
+    background: var(--green-deep);
+    border: none;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: all 0.2s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+
+  .btn-next:hover { background: var(--green-mid); }
+  .btn-next:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-gold { background: var(--gold); color: white; }
+  .btn-gold:hover { background: #b8821e; }
+
+  .success-screen { text-align: center; padding: 3rem 1rem; }
+
+  .success-icon {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: var(--green-light);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 1.5rem;
+    font-size: 36px;
+  }
+
+  .success-title { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; color: var(--green-deep); margin-bottom: 8px; }
+  .success-sub { font-size: 15px; color: var(--muted); max-width: 360px; margin: 0 auto 2rem; line-height: 1.6; }
+
+  .contract-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--gold-pale);
+    border: 1px solid var(--border);
+    border-radius: 50px;
+    padding: 8px 18px;
+    font-size: 13px;
+    color: var(--gold);
+    font-weight: 500;
+    margin-bottom: 2rem;
+    word-break: break-all;
+  }
+
+  .done-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+  .tag { display: inline-flex; align-items: center; gap: 4px; background: var(--green-light); border-radius: 50px; padding: 3px 10px; font-size: 11px; font-weight: 500; color: var(--green-mid); margin-bottom: 1.25rem; }
+
+  .wallet-note {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--gold-pale);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 1rem;
+    border-left: 3px solid var(--gold);
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="header">
+    <div class="logo"></div>
+    <div class="logo-text">Split<span>Naira</span></div>
+  </div>
+
+  <div class="steps-bar">
+    <div class="step-pill active" id="pill-1"><span class="step-num">1</span> Project</div>
+    <div class="step-pill" id="pill-2"><span class="step-num">2</span> Collaborators</div>
+    <div class="step-pill" id="pill-3"><span class="step-num">3</span> Review</div>
+    <div class="step-pill" id="pill-4"><span class="step-num">4</span> Deploy</div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="panel active" id="panel-1">
+    <div class="section-title">Create a split</div>
+    <div class="section-sub">Set up royalty splits for your creative project on Stellar.</div>
+    <div class="card">
+      <div class="field-label">Project type</div>
+      <div class="type-grid">
+        <div class="type-btn selected" onclick="selectType(this,'Music')"><div class="type-icon">🎵</div><div class="type-name">Music</div></div>
+        <div class="type-btn" onclick="selectType(this,'Film')"><div class="type-icon">🎬</div><div class="type-name">Film</div></div>
+        <div class="type-btn" onclick="selectType(this,'Art / NFT')"><div class="type-icon">🎨</div><div class="type-name">Art / NFT</div></div>
+        <div class="type-btn" onclick="selectType(this,'Podcast')"><div class="type-icon">🎙</div><div class="type-name">Podcast</div></div>
+        <div class="type-btn" onclick="selectType(this,'Book')"><div class="type-icon">📖</div><div class="type-name">Book</div></div>
+        <div class="type-btn" onclick="selectType(this,'Other')"><div class="type-icon">✦</div><div class="type-name">Other</div></div>
+      </div>
+      <div class="field-label" style="margin-top:1.25rem;">Project title</div>
+      <input class="field-input" id="proj-title" type="text" placeholder="e.g. Afrobeats Vol. 3 — Album" />
+      <div class="field-label" style="margin-top:1.25rem;">Currency for splits</div>
+      <select class="field-input" id="proj-currency">
+        <option value="XLM">XLM (Stellar Lumens)</option>
+        <option value="USDC">USDC (USD Coin)</option>
+      </select>
+      <div class="wallet-note">Funds deposited to this split contract will be auto-distributed to all collaborators on the Stellar network.</div>
+    </div>
+    <div class="nav-row">
+      <div></div>
+      <button class="btn-next" onclick="goTo(2)">Next — Add collaborators →</button>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="panel" id="panel-2">
+    <div class="section-title">Add collaborators</div>
+    <div class="section-sub">Assign Stellar wallet addresses and percentage splits. Total must equal 100%.</div>
+    <div class="card">
+      <div class="col-labels">
+        <div class="col-label">Name / alias</div>
+        <div class="col-label">Stellar address</div>
+        <div class="col-label">Split</div>
+        <div></div>
+      </div>
+      <div id="collabs-list"></div>
+      <button class="add-collab-btn" onclick="addCollab()">+ Add collaborator</button>
+      <div class="split-meter">
+        <div class="split-bar-bg"><div class="split-bar-fill" id="split-fill" style="width:0%"></div></div>
+        <div class="split-info">
+          <span>0% allocated</span>
+          <span class="split-total" id="split-total">0 / 100%</span>
+        </div>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goTo(1)">← Back</button>
+      <button class="btn-next" id="btn-step2" onclick="goTo(3)" disabled>Review splits →</button>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="panel" id="panel-3">
+    <div class="section-title">Review & confirm</div>
+    <div class="section-sub">Check everything before deploying your Soroban contract.</div>
+    <div class="card" id="review-project"></div>
+    <div class="card" id="review-collabs"></div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goTo(2)">← Back</button>
+      <button class="btn-next btn-gold" onclick="goTo(4)">Deploy contract ✦</button>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="panel" id="panel-4">
+    <div class="success-screen">
+      <div class="success-icon">✦</div>
+      <div class="success-title">Split deployed!</div>
+      <div class="success-sub">Your Soroban royalty contract is live on Stellar Testnet. Collaborators will receive their share automatically when funds are deposited.</div>
+      <div class="contract-pill">⬡ GBNX...7KQP — Split contract address</div>
+      <div class="done-actions">
+        <button class="btn-next" onclick="reset()">Create another split</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let collabs = [];
+  let projectType = 'Music';
+
+  function selectType(el, type) {
+    document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
+    el.classList.add('selected');
+    projectType = type;
+  }
+
+  function addCollab() {
+    const id = Date.now();
+    collabs.push({ id, name: '', address: '', pct: '' });
+    renderCollabs();
+  }
+
+  function removeCollab(id) {
+    collabs = collabs.filter(c => c.id !== id);
+    renderCollabs();
+  }
+
+  function updateCollab(id, field, val) {
+    const c = collabs.find(c => c.id === id);
+    if (c) c[field] = val;
+    updateSplitBar();
+    checkStep2();
+  }
+
+  function getInitials(name) {
+    if (!name) return '?';
+    return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  }
+
+  function renderCollabs() {
+    const list = document.getElementById('collabs-list');
+    list.innerHTML = '';
+    collabs.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'collaborator-row';
+      row.innerHTML = `
+        <input class="field-input" placeholder="e.g. Burna B." value="${c.name}" oninput="updateCollab(${c.id},'name',this.value)" />
+        <input class="field-input" placeholder="G... (Stellar address)" value="${c.address}" oninput="updateCollab(${c.id},'address',this.value)" />
+        <div class="pct-input-wrap">
+          <input type="number" min="1" max="100" placeholder="50" value="${c.pct}" oninput="updateCollab(${c.id},'pct',this.value)" />
+          <span class="pct-symbol">%</span>
+        </div>
+        <button class="remove-btn" onclick="removeCollab(${c.id})">✕</button>
+      `;
+      list.appendChild(row);
+    });
+    updateSplitBar();
+    checkStep2();
+  }
+
+  function getTotal() {
+    return collabs.reduce((s, c) => s + (parseFloat(c.pct) || 0), 0);
+  }
+
+  function updateSplitBar() {
+    const total = getTotal();
+    const fill = document.getElementById('split-fill');
+    const label = document.getElementById('split-total');
+    fill.style.width = Math.min(total, 100) + '%';
+    fill.className = 'split-bar-fill' + (total > 100 ? ' over' : '');
+    label.textContent = Math.round(total) + ' / 100%';
+    label.className = 'split-total' + (total > 100 ? ' over' : total === 100 ? ' ok' : '');
+  }
+
+  function checkStep2() {
+    const total = getTotal();
+    const allFilled = collabs.length >= 2 && collabs.every(c => c.name && c.address && c.pct);
+    document.getElementById('btn-step2').disabled = !(allFilled && Math.round(total) === 100);
+  }
+
+  function buildReview() {
+    const title = document.getElementById('proj-title').value || 'Untitled Project';
+    const currency = document.getElementById('proj-currency').value;
+    document.getElementById('review-project').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div>
+          <div class="field-label">Project</div>
+          <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--green-deep);">${title}</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:2px;">${projectType} · ${currency}</div>
+        </div>
+        <div class="tag">✦ ${collabs.length} collaborators</div>
+      </div>
+      <div class="review-meta">
+        <div class="meta-box"><div class="meta-label">Network</div><div class="meta-val">Stellar Testnet</div></div>
+        <div class="meta-box"><div class="meta-label">Contract type</div><div class="meta-val">Soroban Split</div></div>
+      </div>
+    `;
+    document.getElementById('review-collabs').innerHTML = `
+      <div class="field-label" style="margin-bottom:1rem;">Split breakdown</div>
+      ${collabs.map(c => `
+        <div class="review-item">
+          <div style="display:flex;align-items:center;gap:12px;flex:1;">
+            <div class="review-avatar">${getInitials(c.name)}</div>
+            <div style="flex:1;">
+              <div class="review-name">${c.name}</div>
+              <div class="review-role">${c.address.slice(0,8)}...${c.address.slice(-4)}</div>
+              <div class="review-bar-wrap"><div class="review-bar" style="width:${c.pct}%"></div></div>
+            </div>
+          </div>
+          <div class="review-pct">${c.pct}%</div>
+        </div>
+      `).join('')}
+    `;
+  }
+
+  function goTo(step) {
+    if (step === 3) buildReview();
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + step).classList.add('active');
+    document.querySelectorAll('.step-pill').forEach((p, i) => {
+      p.classList.remove('active', 'done');
+      if (i + 1 === step) p.classList.add('active');
+      if (i + 1 < step) p.classList.add('done');
+    });
+  }
+
+  function reset() {
+    collabs = [];
+    document.getElementById('proj-title').value = '';
+    renderCollabs();
+    goTo(1);
+  }
+
+  addCollab();
+  addCollab();
+</script>
+</body>
+</html>
