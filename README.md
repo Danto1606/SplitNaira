@@ -95,6 +95,12 @@ GitHub Actions runs the following checks:
 - Backend: `npm run lint`, `npm run build`
 - Contracts: `cargo test`
 
+## Backend CD
+
+- Backend deployment workflow: `.github/workflows/backend-deploy.yml`
+- Default deploy target: Render
+- Deployment setup docs: [docs/backend-deploy.md](./docs/backend-deploy.md)
+
 ## Roadmap
 
 - [x] Contract baseline

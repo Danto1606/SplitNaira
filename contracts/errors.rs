@@ -37,4 +37,10 @@ pub enum SplitError {
 
     /// Deposit or transfer amount is invalid
     InvalidAmount = 11,
+
+    /// Token is not included in the configured allowlist
+    TokenNotAllowed = 12,
+
+    /// Contract admin is not configured yet
+    AdminNotSet = 13,
 }

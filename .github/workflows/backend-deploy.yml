@@ -1,0 +1,73 @@
+name: Backend Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: "Deployment target override (defaults to repo variable BACKEND_DEPLOY_TARGET)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  verify-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run build
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: verify-backend
+    env:
+      DEPLOY_TARGET_INPUT: ${{ github.event.inputs.deploy_target }}
+      DEPLOY_TARGET_REPO: ${{ vars.BACKEND_DEPLOY_TARGET }}
+    steps:
+      - name: Resolve deploy target
+        id: target
+        run: |
+          target="$DEPLOY_TARGET_INPUT"
+          if [ -z "$target" ]; then
+            target="$DEPLOY_TARGET_REPO"
+          fi
+          if [ -z "$target" ]; then
+            target="render"
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "Resolved backend deploy target: $target"
+
+      - name: Trigger Render backend deploy
+        if: steps.target.outputs.target == 'render'
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "Missing required secret: RENDER_BACKEND_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+          curl --fail --silent --show-error -X POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Render deploy triggered successfully."
+
+      - name: Fail on unsupported deploy target
+        if: steps.target.outputs.target != 'render'
+        run: |
+          echo "Unsupported deploy target: ${{ steps.target.outputs.target }}"
+          echo "Supported targets: render"
+          exit 1
+

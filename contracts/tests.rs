@@ -206,6 +206,164 @@ fn test_create_project_fails_duplicate_collaborator_address() {
     assert_eq!(result, Err(Ok(SplitError::DuplicateCollaborator)));
 }
 
+#[test]
+fn test_create_project_allows_any_token_when_allowlist_is_empty() {
+    let (env, _admin, _token_a) = create_test_env();
+    let token_b_admin = Address::generate(&env);
+    let token_b = env.register_stellar_asset_contract(token_b_admin);
+
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    client.create_project(
+        &owner,
+        &Symbol::new(&env, "allowlist_off"),
+        &String::from_str(&env, "Allowlist Off"),
+        &String::from_str(&env, "music"),
+        &token_b,
+        &collabs,
+    );
+
+    assert_eq!(client.get_project_count(), 1);
+}
+
+#[test]
+fn test_create_project_fails_when_token_not_allowlisted() {
+    let (env, _admin, token_a) = create_test_env();
+    let token_b_admin = Address::generate(&env);
+    let token_b = env.register_stellar_asset_contract(token_b_admin);
+
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let contract_admin = Address::generate(&env);
+    client.set_admin(&contract_admin);
+    client.allow_token(&contract_admin, &token_a);
+
+    let owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let result = client.try_create_project(
+        &owner,
+        &Symbol::new(&env, "token_blocked"),
+        &String::from_str(&env, "Token Blocked"),
+        &String::from_str(&env, "film"),
+        &token_b,
+        &collabs,
+    );
+
+    assert_eq!(result, Err(Ok(SplitError::TokenNotAllowed)));
+}
+
+#[test]
+fn test_create_project_succeeds_when_token_is_allowlisted() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let contract_admin = Address::generate(&env);
+    client.set_admin(&contract_admin);
+    client.allow_token(&contract_admin, &token);
+
+    let owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[6000u32, 4000u32]),
+    );
+
+    client.create_project(
+        &owner,
+        &Symbol::new(&env, "token_allowed"),
+        &String::from_str(&env, "Token Allowed"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    assert_eq!(client.get_project_count(), 1);
+}
+
+#[test]
+fn test_allowlist_management_requires_admin() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
+
+    let before_admin = client.try_allow_token(&admin, &token);
+    assert_eq!(before_admin, Err(Ok(SplitError::AdminNotSet)));
+
+    client.set_admin(&admin);
+    let admin_from_storage = client.get_admin().unwrap();
+    assert_eq!(admin_from_storage, admin);
+
+    let unauthorized_result = client.try_allow_token(&unauthorized, &token);
+    assert_eq!(unauthorized_result, Err(Ok(SplitError::Unauthorized)));
+
+    client.allow_token(&admin, &token);
+    assert_eq!(client.is_token_allowed(&token), true);
+    assert_eq!(client.get_allowed_token_count(), 1);
+}
+
+#[test]
+fn test_allowlist_turns_off_after_last_token_is_removed() {
+    let (env, _admin, token_a) = create_test_env();
+    let token_b_admin = Address::generate(&env);
+    let token_b = env.register_stellar_asset_contract(token_b_admin);
+
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let contract_admin = Address::generate(&env);
+    client.set_admin(&contract_admin);
+    client.allow_token(&contract_admin, &token_a);
+    assert_eq!(client.get_allowed_token_count(), 1);
+
+    client.disallow_token(&contract_admin, &token_a);
+    assert_eq!(client.get_allowed_token_count(), 0);
+    assert_eq!(client.is_token_allowed(&token_a), false);
+
+    // Allowlist is now off (empty), so non-allowlisted token should work.
+    let owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+    client.create_project(
+        &owner,
+        &Symbol::new(&env, "allowlist_cleared"),
+        &String::from_str(&env, "Allowlist Cleared"),
+        &String::from_str(&env, "art"),
+        &token_b,
+        &collabs,
+    );
+
+    assert_eq!(client.get_project_count(), 1);
+}
+
 // ============================================================
 //  UPDATE + LOCK TESTS
 // ============================================================

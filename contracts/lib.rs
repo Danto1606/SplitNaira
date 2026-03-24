@@ -65,6 +65,12 @@ pub enum DataKey {
     Claimed(Symbol, Address),
     /// Total project count (for enumeration)
     ProjectCount,
+    /// Contract admin for global allowlist management
+    Admin,
+    /// Number of allowlisted token contract addresses
+    AllowedTokenCount,
+    /// Allowlisted token contract address marker
+    AllowedToken(Address),
 }
 
 // ============================================================
@@ -76,6 +82,69 @@ pub struct SplitNairaContract;
 
 #[contractimpl]
 impl SplitNairaContract {
+    // ----------------------------------------------------------
+    // ADMIN + TOKEN ALLOWLIST
+    // ----------------------------------------------------------
+
+    /// Sets or rotates the contract admin.
+    ///
+    /// If admin is not set yet, `admin` must authorize this call.
+    /// If admin is already set, the current admin must authorize this call.
+    pub fn set_admin(env: Env, admin: Address) -> Result<(), SplitError> {
+        if let Some(current_admin) = env.storage().persistent().get(&DataKey::Admin) {
+            current_admin.require_auth();
+        } else {
+            admin.require_auth();
+        }
+
+        env.storage().persistent().set(&DataKey::Admin, &admin);
+        Ok(())
+    }
+
+    /// Adds a token contract address to the allowlist.
+    pub fn allow_token(env: Env, admin: Address, token: Address) -> Result<(), SplitError> {
+        Self::require_contract_admin(&env, &admin)?;
+
+        let key = DataKey::AllowedToken(token);
+        let is_already_allowed = env.storage().persistent().has(&key);
+        if !is_already_allowed {
+            env.storage().persistent().set(&key, &true);
+
+            let count: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::AllowedTokenCount)
+                .unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::AllowedTokenCount, &count.saturating_add(1));
+        }
+
+        Ok(())
+    }
+
+    /// Removes a token contract address from the allowlist.
+    pub fn disallow_token(env: Env, admin: Address, token: Address) -> Result<(), SplitError> {
+        Self::require_contract_admin(&env, &admin)?;
+
+        let key = DataKey::AllowedToken(token);
+        let was_allowed = env.storage().persistent().has(&key);
+        if was_allowed {
+            env.storage().persistent().remove(&key);
+
+            let count: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::AllowedTokenCount)
+                .unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::AllowedTokenCount, &count.saturating_sub(1));
+        }
+
+        Ok(())
+    }
+
     // ----------------------------------------------------------
     // CREATE PROJECT
     // ----------------------------------------------------------
@@ -95,6 +164,7 @@ impl SplitNairaContract {
     /// * `SplitError::InvalidSplit`      - if basis points don't sum to 10000
     /// * `SplitError::TooFewCollaborators` - if fewer than 2 collaborators provided
     /// * `SplitError::ProjectExists`     - if project_id already exists
+    /// * `SplitError::TokenNotAllowed`   - if allowlist is active and token is not allowed
     pub fn create_project(
         env: Env,
         owner: Address,
@@ -115,6 +185,7 @@ impl SplitNairaContract {
             return Err(SplitError::ProjectExists);
         }
 
+        Self::validate_token_allowlist(&env, &token)?;
         Self::validate_collaborators(&collaborators)?;
 
         let project = SplitProject {
@@ -383,6 +454,26 @@ impl SplitNairaContract {
             .unwrap_or(0))
     }
 
+    /// Returns true if a token is currently allowlisted.
+    pub fn is_token_allowed(env: Env, token: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::AllowedToken(token))
+    }
+
+    /// Returns the number of allowlisted token addresses.
+    pub fn get_allowed_token_count(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AllowedTokenCount)
+            .unwrap_or(0)
+    }
+
+    /// Returns the configured contract admin, if set.
+    pub fn get_admin(env: Env) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::Admin)
+    }
+
     // ----------------------------------------------------------
     // INTERNAL HELPERS
     // ----------------------------------------------------------
@@ -392,6 +483,43 @@ impl SplitNairaContract {
             .persistent()
             .get(&DataKey::Project(project_id.clone()))
             .ok_or(SplitError::NotFound)
+    }
+
+    fn require_contract_admin(env: &Env, admin: &Address) -> Result<(), SplitError> {
+        let current_admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(SplitError::AdminNotSet)?;
+
+        if current_admin != admin.clone() {
+            return Err(SplitError::Unauthorized);
+        }
+
+        admin.require_auth();
+        Ok(())
+    }
+
+    fn validate_token_allowlist(env: &Env, token: &Address) -> Result<(), SplitError> {
+        let allowed_token_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AllowedTokenCount)
+            .unwrap_or(0);
+
+        if allowed_token_count == 0 {
+            return Ok(());
+        }
+
+        let is_allowed = env
+            .storage()
+            .persistent()
+            .has(&DataKey::AllowedToken(token.clone()));
+        if !is_allowed {
+            return Err(SplitError::TokenNotAllowed);
+        }
+
+        Ok(())
     }
 
     fn validate_collaborators(collaborators: &Vec<Collaborator>) -> Result<(), SplitError> {
