@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:watch": "vitest --watch"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "14.6.1",
@@ -26,9 +27,9 @@
     "@types/express": "5.0.6",
     "@types/morgan": "1.9.9",
     "@types/node": "22.13.9",
+    "@types/supertest": "6.0.2",
     "@typescript-eslint/eslint-plugin": "8.24.1",
     "@typescript-eslint/parser": "8.24.1",
-    "@types/supertest": "6.0.2",
     "eslint": "10.0.1",
     "globals": "16.0.0",
     "supertest": "7.0.0",
@@ -37,4 +38,3 @@
     "vitest": "3.0.7"
   }
 }
-
