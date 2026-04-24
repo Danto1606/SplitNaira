@@ -19,8 +19,12 @@ export function errorHandler(
 ) {
   const requestId = res.locals.requestId;
   
-  if (err instanceof AppError) {
-    const status = err.type === ErrorType.VALIDATION || err.type === ErrorType.AUTH ? 400 : 500;
+  // Use property check instead of instanceof for better compatibility with different module instances/mocks
+  const isAppError = err && typeof err === "object" && "type" in err && "code" in err;
+
+  if (isAppError) {
+    const appError = err as AppError;
+    const status = appError.type === ErrorType.VALIDATION || appError.type === ErrorType.AUTH ? 400 : 500;
     
     // Log structured error
     console.error({

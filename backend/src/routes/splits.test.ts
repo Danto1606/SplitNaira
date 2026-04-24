@@ -50,11 +50,16 @@ vi.mock("@stellar/stellar-sdk", () => {
         return { preparedOperation: this.op };
       }
     })),
-    nativeToScVal: vi.fn((value: unknown) => value),
+    nativeToScVal: vi.fn((value: unknown) => ({
+      toXDR: () => `MOCKED_XDR_${value}`
+    })),
     scValToNative: vi.fn((value: unknown) => value),
     rpc: {
       Server: vi.fn(() => serverMock)
     },
+    Address: vi.fn().mockImplementation((address: string) => ({
+      toScVal: () => ({ toXDR: () => `MOCKED_SCVAL_${address}` })
+    })),
     xdr: {
       ScVal: {
         scvMap: (items: unknown[]) => items,
@@ -79,9 +84,9 @@ const createApp = () => {
 beforeAll(() => {
   process.env.HORIZON_URL = "https://horizon.test";
   process.env.SOROBAN_RPC_URL = "https://soroban.test";
-  process.env.SOROBAN_NETWORK_PASSPHRASE = "Test SDF Network";
-  process.env.CONTRACT_ID = "TESTCONTRACT";
-  process.env.SIMULATOR_ACCOUNT = "GTESTSIMULATOR";
+  process.env.SOROBAN_NETWORK_PASSPHRASE = "test";
+  process.env.CONTRACT_ID = "CBLASIRZ7CUKC7S5IS3VSNMQGKZ5FTRWLHZZXH7H4YG6ZLRFPJF5H2LR";
+  process.env.SIMULATOR_ACCOUNT = "test_account";
 });
 
 beforeEach(() => {
@@ -352,24 +357,27 @@ describe("splits routes integration", () => {
 
     const response = await request(app).get("/splits/project_1/history").expect(200);
 
-    expect(response.body).toEqual([
-      {
-        type: "round",
-        round: 2,
-        amount: "100",
-        txHash: "TX2",
-        ledgerCloseTime: "2025-01-02T00:00:00Z",
-        id: "round-2"
-      },
-      {
-        type: "payment",
-        recipient: "GUSER",
-        amount: "50",
-        txHash: "TX1",
-        ledgerCloseTime: "2025-01-01T00:00:00Z",
-        id: "payment-1"
-      }
-    ]);
+    expect(response.body).toEqual({
+      items: [
+        {
+          type: "round",
+          round: 2,
+          amount: "100",
+          txHash: "TX2",
+          ledgerCloseTime: "2025-01-02T00:00:00Z",
+          id: "round-2"
+        },
+        {
+          type: "payment",
+          recipient: "GUSER",
+          amount: "50",
+          txHash: "TX1",
+          ledgerCloseTime: "2025-01-01T00:00:00Z",
+          id: "payment-1"
+        }
+      ],
+      nextCursor: null
+    });
 
     expect(getEventsMock).toHaveBeenCalledTimes(2);
   });

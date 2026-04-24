@@ -141,6 +141,11 @@ const updateCollaboratorsSchema = z
     }
   });
 
+const adminTokenSchema = z.object({
+  admin: stellarAddressSchema.describe("admin"),
+  token: stellarAddressSchema.describe("token")
+});
+
 function toCollaboratorScVal(collaborator: z.infer<typeof collaboratorSchema>) {
   return xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
@@ -492,20 +497,18 @@ splitsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =>
 
     const parsed = listProjectsSchema.safeParse(req.query);
     if (!parsed.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: parsed.error.flatten(),
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid request payload.",
+        undefined,
+        parsed.error.flatten()
+      );
     }
 
     const projects = await listProjects(parsed.data.start, parsed.data.limit);
     return res.status(200).json(projects);
   } catch (error) {
-    if (error instanceof RequestValidationError) {
-      return next(new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message));
-    }
     return next(error);
   }
 });
@@ -513,23 +516,25 @@ splitsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =>
 splitsRouter.get("/:projectId", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
-    const projectIdRaw = req.params.projectId;
-    const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
-    if (!projectId) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "projectId is required",
-        requestId
-      });
+    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
+    if (!parsedId.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid projectId format.",
+        undefined,
+        parsedId.error.flatten()
+      );
     }
+    const projectId = parsedId.data;
 
     const project = await fetchProjectById(projectId);
     if (!project) {
-      return res.status(404).json({
-        error: "not_found",
-        message: `Split project ${projectId} not found.`,
-        requestId
-      });
+      throw new AppError(
+        ErrorType.RPC,
+        ErrorCode.NOT_FOUND,
+        `Split project ${projectId} not found.`
+      );
     }
 
     return res.status(200).json(project);
@@ -538,25 +543,35 @@ splitsRouter.get("/:projectId", async (req: Request, res: Response, next: NextFu
   }
 });
 
-splitsRouter.post("/:projectId/lock", async (req, res, next) => {
+splitsRouter.post("/:projectId/lock", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
+    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
+    if (!parsedId.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid projectId format.",
+        undefined,
+        parsedId.error.flatten()
+      );
+    }
+    const projectId = parsedId.data;
 
-    const parsedParams = projectIdParamSchema.safeParse(req.params.projectId);
     const parsedBody = lockProjectSchema.safeParse(req.body);
 
-    if (!parsedParams.success || !parsedBody.success) {
+    if (!parsedBody.success) {
       throw new AppError(
         ErrorType.VALIDATION,
         ErrorCode.VALIDATION_ERROR,
         "Invalid request payload.",
-        { message: "Check project ID and owner address." }
+        { message: "Check owner address." }
       );
     }
 
     try {
       const result = await buildLockProjectUnsignedXdr({
-        projectId: parsedParams.data,
+        projectId: projectId,
         owner: parsedBody.data.owner
       });
       return res.status(200).json(result);
@@ -571,25 +586,35 @@ splitsRouter.post("/:projectId/lock", async (req, res, next) => {
   }
 });
 
-splitsRouter.post("/:projectId/deposit", async (req, res, next) => {
+splitsRouter.post("/:projectId/deposit", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
+    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
+    if (!parsedId.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid projectId format.",
+        undefined,
+        parsedId.error.flatten()
+      );
+    }
+    const projectId = parsedId.data;
 
-    const parsedParams = projectIdParamSchema.safeParse(req.params.projectId);
     const parsedBody = depositSchema.safeParse(req.body);
 
-    if (!parsedParams.success || !parsedBody.success) {
+    if (!parsedBody.success) {
       throw new AppError(
         ErrorType.VALIDATION,
         ErrorCode.VALIDATION_ERROR,
         "Invalid request payload.",
-        { message: "Check project ID and deposit details." }
+        { message: "Check deposit details." }
       );
     }
 
     try {
       const result = await buildDepositUnsignedXdr({
-        projectId: parsedParams.data,
+        projectId: projectId,
         from: parsedBody.data.from,
         amount: parsedBody.data.amount
       });
@@ -605,25 +630,35 @@ splitsRouter.post("/:projectId/deposit", async (req, res, next) => {
   }
 });
 
-splitsRouter.put("/:projectId/collaborators", async (req, res, next) => {
+splitsRouter.put("/:projectId/collaborators", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
+    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
+    if (!parsedId.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid projectId format.",
+        undefined,
+        parsedId.error.flatten()
+      );
+    }
+    const projectId = parsedId.data;
 
-    const parsedParams = projectIdParamSchema.safeParse(req.params.projectId);
     const parsedBody = updateCollaboratorsSchema.safeParse(req.body);
 
-    if (!parsedParams.success || !parsedBody.success) {
+    if (!parsedBody.success) {
       throw new AppError(
         ErrorType.VALIDATION,
         ErrorCode.VALIDATION_ERROR,
         "Invalid request payload.",
-        { message: "Check project ID and collaborator list." }
+        { message: "Check collaborator list." }
       );
     }
 
     try {
       const result = await buildUpdateCollaboratorsUnsignedXdr({
-        projectId: parsedParams.data,
+        projectId: projectId,
         owner: parsedBody.data.owner,
         collaborators: parsedBody.data.collaborators
       });
@@ -674,15 +709,17 @@ const distributeSchema = z.object({
 splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
-    const projectIdRaw = req.params.projectId;
-    const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
-    if (!projectId) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "projectId is required",
-        requestId
-      });
+    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
+    if (!parsedId.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid projectId format.",
+        undefined,
+        parsedId.error.flatten()
+      );
     }
+    const projectId = parsedId.data;
 
     const parsed = distributeSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -745,13 +782,24 @@ splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, 
 splitsRouter.get("/:projectId/claimable/:address", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
-    const { projectId, address } = req.params;
+    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
+    if (!parsedId.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid projectId format.",
+        undefined,
+        parsedId.error.flatten()
+      );
+    }
+    const projectId = parsedId.data;
+    const { address } = req.params;
 
-    if (!projectId || !address) {
+    if (!address) {
       throw new AppError(
         ErrorType.VALIDATION, 
         ErrorCode.VALIDATION_ERROR, 
-        "projectId and address are required"
+        "address is required"
       );
     }
 
@@ -793,7 +841,11 @@ splitsRouter.get("/:projectId/claimable/:address", async (req: Request, res: Res
     }
     const retval = "result" in simulated ? simulated.result?.retval : undefined;
     if (!retval) {
-      return res.status(404).json({ error: "not_found", message: "Claimable info not found", requestId });
+      throw new AppError(
+        ErrorType.RPC,
+        ErrorCode.NOT_FOUND,
+        "Claimable info not found"
+      );
     }
 
     return res.status(200).json(scValToNative(retval));
@@ -810,15 +862,17 @@ const historyQuerySchema = z.object({
 splitsRouter.get("/:projectId/history", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
-    const projectIdRaw = req.params.projectId;
-    const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
-    if (!projectId) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "projectId is required",
-        requestId
-      });
+    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
+    if (!parsedId.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid projectId format.",
+        undefined,
+        parsedId.error.flatten()
+      );
     }
+    const projectId = parsedId.data;
 
     const parsedQuery = historyQuerySchema.safeParse(req.query);
     if (!parsedQuery.success) {
@@ -899,6 +953,102 @@ splitsRouter.get("/:projectId/history", async (req: Request, res: Response, next
     return res.status(200).json({
       items: events,
       nextCursor
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+async function buildAdminTokenXdr(
+  operation: "allow_token" | "disallow_token",
+  input: z.infer<typeof adminTokenSchema>
+) {
+  const config = loadStellarConfig();
+  const server = getStellarRpcServer();
+
+  let adminAccount;
+  try {
+    adminAccount = await server.getAccount(input.admin);
+  } catch {
+    throw new AppError(
+      ErrorType.VALIDATION,
+      ErrorCode.VALIDATION_ERROR,
+      "admin account not found on selected network"
+    );
+  }
+
+  const contract = new Contract(config.contractId);
+  const tx = new TransactionBuilder(adminAccount, {
+    fee: BASE_FEE,
+    networkPassphrase: config.networkPassphrase
+  })
+    .addOperation(
+      contract.call(
+        operation,
+        new Address(input.admin).toScVal(),
+        new Address(input.token).toScVal()
+      )
+    )
+    .setTimeout(30)
+    .build();
+
+  return tx.toXDR();
+}
+
+splitsRouter.post("/admin/allow-token", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = adminTokenSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid request payload.",
+        undefined,
+        parsed.error.flatten()
+      );
+    }
+
+    const xdr = await buildAdminTokenXdr("allow_token", parsed.data);
+    const config = loadStellarConfig();
+
+    return res.status(200).json({
+      xdr,
+      metadata: {
+        contractId: config.contractId,
+        networkPassphrase: config.networkPassphrase,
+        sourceAccount: parsed.data.admin,
+        operation: "allow_token"
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+splitsRouter.post("/admin/disallow-token", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = adminTokenSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid request payload.",
+        undefined,
+        parsed.error.flatten()
+      );
+    }
+
+    const xdr = await buildAdminTokenXdr("disallow_token", parsed.data);
+    const config = loadStellarConfig();
+
+    return res.status(200).json({
+      xdr,
+      metadata: {
+        contractId: config.contractId,
+        networkPassphrase: config.networkPassphrase,
+        sourceAccount: parsed.data.admin,
+        operation: "disallow_token"
+      }
     });
   } catch (error) {
     return next(error);

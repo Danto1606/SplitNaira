@@ -11,6 +11,8 @@ const { mockGetEvents, mockGetAccount } = vi.hoisted(() => ({
 
 vi.mock("../services/stellar.js", () => {
   class RequestValidationError extends Error {
+    type = "VALIDATION";
+    code = "VALIDATION_ERROR";
     constructor(message: string) {
       super(message);
       this.name = "RequestValidationError";
