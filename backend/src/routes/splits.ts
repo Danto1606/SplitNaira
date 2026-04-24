@@ -17,6 +17,13 @@ import {
   RequestValidationError 
 } from "../services/stellar.js";
 
+import { 
+  AppError, 
+  ErrorCode, 
+  ErrorType, 
+  translateSorobanError 
+} from "../lib/errors.js";
+
 export const splitsRouter = Router();
 
 // Strict Stellar address validator used across schemas
@@ -202,7 +209,12 @@ async function buildCreateProjectUnsignedXdr(
     .setTimeout(300)
     .build();
 
-  const preparedTx = await server.prepareTransaction(tx);
+  let preparedTx;
+  try {
+    preparedTx = await server.prepareTransaction(tx);
+  } catch (error) {
+    throw translateSorobanError(error);
+  }
 
   return {
     xdr: preparedTx.toXDR(),
@@ -239,7 +251,12 @@ async function listProjects(start: number, limit: number) {
     .setTimeout(300)
     .build();
 
-  const simulated = await server.simulateTransaction(tx);
+  let simulated;
+  try {
+    simulated = await server.simulateTransaction(tx);
+  } catch (error) {
+    throw translateSorobanError(error);
+  }
   const retval = "result" in simulated ? simulated.result?.retval : undefined;
   if (!retval) {
     return [];
@@ -268,7 +285,12 @@ async function fetchProjectById(projectId: string) {
     .setTimeout(300)
     .build();
 
-  const simulated = await server.simulateTransaction(tx);
+  let simulated;
+  try {
+    simulated = await server.simulateTransaction(tx);
+  } catch (error) {
+    throw translateSorobanError(error);
+  }
   const retval = "result" in simulated ? simulated.result?.retval : undefined;
   if (!retval) {
     return null;
@@ -316,7 +338,12 @@ async function buildLockProjectUnsignedXdr(input: LockProjectRequest) {
     .setTimeout(300)
     .build();
 
-  const preparedTx = await server.prepareTransaction(tx);
+  let preparedTx;
+  try {
+    preparedTx = await server.prepareTransaction(tx);
+  } catch (error) {
+    throw translateSorobanError(error);
+  }
   return {
     xdr: preparedTx.toXDR(),
     metadata: {
@@ -370,7 +397,12 @@ async function buildDepositUnsignedXdr(input: DepositRequest) {
     .setTimeout(300)
     .build();
 
-  const preparedTx = await server.prepareTransaction(tx);
+  let preparedTx;
+  try {
+    preparedTx = await server.prepareTransaction(tx);
+  } catch (error) {
+    throw translateSorobanError(error);
+  }
   return {
     xdr: preparedTx.toXDR(),
     metadata: {
@@ -430,7 +462,12 @@ async function buildUpdateCollaboratorsUnsignedXdr(
     .setTimeout(300)
     .build();
 
-  const preparedTx = await server.prepareTransaction(tx);
+  let preparedTx;
+  try {
+    preparedTx = await server.prepareTransaction(tx);
+  } catch (error) {
+    throw translateSorobanError(error);
+  }
   return {
     xdr: preparedTx.toXDR(),
     metadata: {
@@ -463,20 +500,12 @@ splitsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =>
       });
     }
 
-    try {
-      const projects = await listProjects(parsed.data.start, parsed.data.limit);
-      return res.status(200).json(projects);
-    } catch (error) {
-      if (error instanceof RequestValidationError) {
-        return res.status(400).json({
-          error: "validation_error",
-          message: error.message,
-          requestId
-        });
-      }
-      throw error;
-    }
+    const projects = await listProjects(parsed.data.start, parsed.data.limit);
+    return res.status(200).json(projects);
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return next(new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message));
+    }
     return next(error);
   }
 });
@@ -517,15 +546,12 @@ splitsRouter.post("/:projectId/lock", async (req, res, next) => {
     const parsedBody = lockProjectSchema.safeParse(req.body);
 
     if (!parsedParams.success || !parsedBody.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: {
-          params: parsedParams.success ? null : parsedParams.error.flatten(),
-          body: parsedBody.success ? null : parsedBody.error.flatten()
-        },
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid request payload.",
+        { message: "Check project ID and owner address." }
+      );
     }
 
     try {
@@ -536,11 +562,7 @@ splitsRouter.post("/:projectId/lock", async (req, res, next) => {
       return res.status(200).json(result);
     } catch (error) {
       if (error instanceof RequestValidationError) {
-        return res.status(400).json({
-          error: "validation_error",
-          message: error.message,
-          requestId
-        });
+        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
       }
       throw error;
     }
@@ -557,15 +579,12 @@ splitsRouter.post("/:projectId/deposit", async (req, res, next) => {
     const parsedBody = depositSchema.safeParse(req.body);
 
     if (!parsedParams.success || !parsedBody.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: {
-          params: parsedParams.success ? null : parsedParams.error.flatten(),
-          body: parsedBody.success ? null : parsedBody.error.flatten()
-        },
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid request payload.",
+        { message: "Check project ID and deposit details." }
+      );
     }
 
     try {
@@ -577,11 +596,7 @@ splitsRouter.post("/:projectId/deposit", async (req, res, next) => {
       return res.status(200).json(result);
     } catch (error) {
       if (error instanceof RequestValidationError) {
-        return res.status(400).json({
-          error: "validation_error",
-          message: error.message,
-          requestId
-        });
+        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
       }
       throw error;
     }
@@ -598,15 +613,12 @@ splitsRouter.put("/:projectId/collaborators", async (req, res, next) => {
     const parsedBody = updateCollaboratorsSchema.safeParse(req.body);
 
     if (!parsedParams.success || !parsedBody.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: {
-          params: parsedParams.success ? null : parsedParams.error.flatten(),
-          body: parsedBody.success ? null : parsedBody.error.flatten()
-        },
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid request payload.",
+        { message: "Check project ID and collaborator list." }
+      );
     }
 
     try {
@@ -618,11 +630,7 @@ splitsRouter.put("/:projectId/collaborators", async (req, res, next) => {
       return res.status(200).json(result);
     } catch (error) {
       if (error instanceof RequestValidationError) {
-        return res.status(400).json({
-          error: "validation_error",
-          message: error.message,
-          requestId
-        });
+        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
       }
       throw error;
     }
@@ -635,13 +643,14 @@ splitsRouter.post("/", async (req, res, next) => {
   try {
     const requestId = res.locals.requestId;
     const parsed = createSplitSchema.safeParse(req.body);
+
     if (!parsed.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: parsed.error.flatten(),
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
+        "Invalid request payload.",
+        { message: "Check the provided project details." }
+      );
     }
 
     try {
@@ -649,11 +658,7 @@ splitsRouter.post("/", async (req, res, next) => {
       return res.status(200).json(result);
     } catch (error) {
       if (error instanceof RequestValidationError) {
-        return res.status(400).json({
-          error: "validation_error",
-          message: error.message,
-          requestId
-        });
+        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
       }
       throw error;
     }
@@ -681,12 +686,12 @@ splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, 
 
     const parsed = distributeSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: parsed.error.flatten(),
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION, 
+        ErrorCode.VALIDATION_ERROR, 
+        "Invalid request payload.",
+        { message: "Check the distribution request body." }
+      );
     }
 
     const config = loadStellarConfig();
@@ -697,25 +702,31 @@ splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, 
     try {
       sourceAccount = await server.getAccount(sourceAddress);
     } catch {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "source account not found on selected network",
-        requestId
-      });
+      throw new AppError(
+        ErrorType.ACCOUNT_STATE,
+        ErrorCode.ACCOUNT_NOT_FOUND,
+        "Source account not found on selected network",
+        { message: "The account used to trigger distribution must exist and be funded.", action: "Check Source Wallet" }
+      );
     }
+    
+    let preparedTx;
+    try {
+      const contract = new Contract(config.contractId);
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: config.networkPassphrase
+      })
+        .addOperation(
+          contract.call("distribute", nativeToScVal(projectId, { type: "symbol" }))
+        )
+        .setTimeout(300)
+        .build();
 
-    const contract = new Contract(config.contractId);
-    const tx = new TransactionBuilder(sourceAccount, {
-      fee: BASE_FEE,
-      networkPassphrase: config.networkPassphrase
-    })
-      .addOperation(
-        contract.call("distribute", nativeToScVal(projectId, { type: "symbol" }))
-      )
-      .setTimeout(300)
-      .build();
-
-    const preparedTx = await server.prepareTransaction(tx);
+      preparedTx = await server.prepareTransaction(tx);
+    } catch (error) {
+      throw translateSorobanError(error);
+    }
 
     return res.status(200).json({
       xdr: preparedTx.toXDR(),
@@ -737,11 +748,11 @@ splitsRouter.get("/:projectId/claimable/:address", async (req: Request, res: Res
     const { projectId, address } = req.params;
 
     if (!projectId || !address) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "projectId and address are required",
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION, 
+        ErrorCode.VALIDATION_ERROR, 
+        "projectId and address are required"
+      );
     }
 
     const config = loadStellarConfig();
@@ -751,29 +762,35 @@ splitsRouter.get("/:projectId/claimable/:address", async (req: Request, res: Res
     try {
       sourceAccount = await server.getAccount(config.simulatorAccount);
     } catch {
-      return res.status(500).json({
-        error: "server_error",
-        message: "simulator account not found",
-        requestId
-      });
+      throw new AppError(
+        ErrorType.ACCOUNT_STATE,
+        ErrorCode.ACCOUNT_NOT_FOUND,
+        "Simulator account not found",
+        { message: "The backend simulator account is not configured correctly." }
+      );
     }
 
-    const contract = new Contract(config.contractId);
-    const tx = new TransactionBuilder(sourceAccount, {
-      fee: BASE_FEE,
-      networkPassphrase: config.networkPassphrase
-    })
-      .addOperation(
-        contract.call(
-          "get_claimable",
-          nativeToScVal(projectId, { type: "symbol" }),
-          Address.fromString(address).toScVal()
+    let simulated;
+    try {
+      const contract = new Contract(config.contractId);
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: config.networkPassphrase
+      })
+        .addOperation(
+          contract.call(
+            "get_claimable",
+            nativeToScVal(projectId, { type: "symbol" }),
+            Address.fromString(address).toScVal()
+          )
         )
-      )
-      .setTimeout(300)
-      .build();
+        .setTimeout(300)
+        .build();
 
-    const simulated = await server.simulateTransaction(tx);
+      simulated = await server.simulateTransaction(tx);
+    } catch (error) {
+      throw translateSorobanError(error);
+    }
     const retval = "result" in simulated ? simulated.result?.retval : undefined;
     if (!retval) {
       return res.status(404).json({ error: "not_found", message: "Claimable info not found", requestId });
@@ -805,12 +822,12 @@ splitsRouter.get("/:projectId/history", async (req: Request, res: Response, next
 
     const parsedQuery = historyQuerySchema.safeParse(req.query);
     if (!parsedQuery.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid query parameters.",
-        details: parsedQuery.error.flatten(),
-        requestId
-      });
+      throw new AppError(
+        ErrorType.VALIDATION, 
+        ErrorCode.VALIDATION_ERROR, 
+        "Invalid query parameters.",
+        { message: "Check cursor and limit parameters." }
+      );
     }
     const { cursor, limit } = parsedQuery.data;
 

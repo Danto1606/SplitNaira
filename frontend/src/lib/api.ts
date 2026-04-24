@@ -30,11 +30,49 @@ interface BuildSplitResponse {
     contractId: string;
   };
 }
+export interface RemediationHint {
+  message: string;
+  action?: string;
+  docsUrl?: string;
+}
+
+export interface ApiErrorResponse {
+  error: string;
+  code: string;
+  type: string;
+  message: string;
+  remediation?: RemediationHint;
+  requestId: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public payload: ApiErrorResponse,
+    fallback: string
+  ) {
+    super(payload?.message || fallback);
+    this.name = "ApiError";
+  }
+
+  get remediation() {
+    return this.payload?.remediation;
+  }
+
+  get code() {
+    return this.payload?.code;
+  }
+}
+
 function toErrorMessage(status: number, payload: unknown, fallback: string) {
-  if (payload && typeof payload === "object" && "message" in payload) {
-    const message = (payload as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) {
-      return message;
+  if (payload && typeof payload === "object") {
+    const errorPayload = payload as ApiErrorResponse;
+    if (errorPayload.message) {
+      let msg = errorPayload.message;
+      if (errorPayload.remediation) {
+        msg += `\n\nSuggestion: ${errorPayload.remediation.message}`;
+      }
+      return msg;
     }
   }
   return `${fallback} (status ${status})`;
