@@ -1937,9 +1937,10 @@ export function SplitApp() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Category</label>
-                  <TokenSelector
+                  <input
                     value={editProjectType}
-                    onChange={setEditProjectType}
+                    onChange={(e) => setEditProjectType(e.target.value)}
+                    className="glass-input w-full rounded-2xl px-5 py-4 text-sm"
                   />
                 </div>
                 <div className="flex gap-3 pt-4">

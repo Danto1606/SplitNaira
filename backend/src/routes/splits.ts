@@ -889,7 +889,9 @@ splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, 
 splitsRouter.get("/:projectId/claimable/:address", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
-    const { projectId, address } = req.params;
+    const { projectId: projectIdRaw, address: addressRaw } = req.params;
+    const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
+    const address = typeof addressRaw === "string" ? addressRaw.trim() : "";
 
     if (!projectId || !address) {
       return res.status(400).json({
