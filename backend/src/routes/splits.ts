@@ -34,7 +34,7 @@ export const stellarAddressSchema = z
     }
   });
 
-const collaboratorSchema = z.object({
+export const collaboratorSchema = z.object({
   address: stellarAddressSchema,
   alias: z.string().min(1, "alias is required").max(64),
   basisPoints: z
@@ -44,7 +44,7 @@ const collaboratorSchema = z.object({
     .max(10_000, "basisPoints must be <= 10000")
 });
 
-const createSplitSchema = z
+export const createSplitSchema = z
   .object({
     owner: stellarAddressSchema.describe("owner"),
     projectId: z
@@ -84,17 +84,17 @@ const createSplitSchema = z
     }
   });
 
-const projectIdParamSchema = z
+export const projectIdParamSchema = z
   .string()
   .min(1, "projectId is required")
   .max(32, "projectId must be at most 32 characters")
   .regex(/^[a-zA-Z0-9_]+$/, "projectId must be alphanumeric/underscore");
 
-const lockProjectSchema = z.object({
+export const lockProjectSchema = z.object({
   owner: stellarAddressSchema.describe("owner")
 });
 
-const depositSchema = z.object({
+export const depositSchema = z.object({
   from: stellarAddressSchema.describe("from"),
   amount: z
     .number()
@@ -102,7 +102,13 @@ const depositSchema = z.object({
     .describe("deposit amount in stroops")
 });
 
-const updateCollaboratorsSchema = z
+export const updateMetadataSchema = z.object({
+  owner: stellarAddressSchema.describe("owner"),
+  title: z.string().min(1, "title is required").max(128),
+  projectType: z.string().min(1, "projectType is required").max(32)
+});
+
+export const updateCollaboratorsSchema = z
   .object({
     owner: stellarAddressSchema.describe("owner"),
     collaborators: z.array(collaboratorSchema).min(2, "at least 2 collaborators are required")
@@ -497,7 +503,61 @@ async function buildUpdateCollaboratorsUnsignedXdr(
   };
 }
 
-const listProjectsSchema = z.object({
+async function buildUpdateMetadataUnsignedXdr(input: {
+  projectId: string;
+  owner: string;
+  title: string;
+  projectType: string;
+}) {
+  const config = loadStellarConfig();
+  const server = new rpc.Server(config.sorobanRpcUrl, { allowHttp: true });
+
+  let sourceAccount;
+  try {
+    sourceAccount = await server.getAccount(input.owner);
+  } catch {
+    throw new RequestValidationError("owner account not found on selected network");
+  }
+
+  let ownerAddress: Address;
+  try {
+    ownerAddress = Address.fromString(input.owner);
+  } catch {
+    throw new RequestValidationError("owner address must be a valid Stellar address");
+  }
+
+  const contract = new Contract(config.contractId);
+  const tx = new TransactionBuilder(sourceAccount, {
+    fee: BASE_FEE,
+    networkPassphrase: config.networkPassphrase
+  })
+    .addOperation(
+      contract.call(
+        "update_project_metadata",
+        nativeToScVal(input.projectId, { type: "symbol" }),
+        ownerAddress.toScVal(),
+        nativeToScVal(input.title),
+        nativeToScVal(input.projectType)
+      )
+    )
+    .setTimeout(300)
+    .build();
+
+  const preparedTx = await server.prepareTransaction(tx);
+  return {
+    xdr: preparedTx.toXDR(),
+    metadata: {
+      contractId: config.contractId,
+      networkPassphrase: config.networkPassphrase,
+      sourceAccount: input.owner,
+      sequenceNumber: preparedTx.sequence,
+      fee: preparedTx.fee,
+      operation: "update_project_metadata"
+    }
+  };
+}
+
+export const listProjectsSchema = z.object({
   start: z.coerce.number().int().min(0).default(0),
   limit: z.coerce.number().int().min(1).max(100).default(10)
 });
@@ -643,6 +703,48 @@ splitsRouter.post("/:projectId/deposit", async (req, res, next) => {
   }
 });
 
+splitsRouter.patch("/:projectId/metadata", async (req, res, next) => {
+  try {
+    const requestId = res.locals.requestId;
+
+    const parsedParams = projectIdParamSchema.safeParse(req.params.projectId);
+    const parsedBody = updateMetadataSchema.safeParse(req.body);
+
+    if (!parsedParams.success || !parsedBody.success) {
+      return res.status(400).json({
+        error: "validation_error",
+        message: "Invalid request payload.",
+        details: {
+          params: parsedParams.success ? null : parsedParams.error.flatten(),
+          body: parsedBody.success ? null : parsedBody.error.flatten()
+        },
+        requestId
+      });
+    }
+
+    try {
+      const result = await buildUpdateMetadataUnsignedXdr({
+        projectId: parsedParams.data,
+        owner: parsedBody.data.owner,
+        title: parsedBody.data.title,
+        projectType: parsedBody.data.projectType
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      if (error instanceof RequestValidationError) {
+        return res.status(400).json({
+          error: "validation_error",
+          message: error.message,
+          requestId
+        });
+      }
+      throw error;
+    }
+  } catch (error) {
+    return next(error);
+  }
+});
+
 splitsRouter.put("/:projectId/collaborators", async (req, res, next) => {
   try {
     const requestId = res.locals.requestId;
@@ -715,7 +817,7 @@ splitsRouter.post("/", async (req, res, next) => {
   }
 });
 
-const distributeSchema = z.object({
+export const distributeSchema = z.object({
   sourceAddress: z.string().min(1, "sourceAddress is required").optional()
 });
 
@@ -787,7 +889,9 @@ splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, 
 splitsRouter.get("/:projectId/claimable/:address", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
-    const { projectId, address } = req.params;
+    const { projectId: projectIdRaw, address: addressRaw } = req.params;
+    const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
+    const address = typeof addressRaw === "string" ? addressRaw.trim() : "";
 
     if (!projectId || !address) {
       return res.status(400).json({
@@ -986,7 +1090,7 @@ splitsRouter.post("/admin/disallow-token", async (req: Request, res: Response, n
   }
 });
 
-const historyQuerySchema = z.object({
+export const historyQuerySchema = z.object({
   cursor: z.string().default(""),
   limit: z.coerce.number().int().min(1).max(200).default(100)
 });

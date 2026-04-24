@@ -2,6 +2,7 @@ import type { SplitProject } from "./stellar";
 import { getEnv } from "./env";
 
 const API_BASE_URL = getEnv().NEXT_PUBLIC_API_BASE_URL;
+
 export interface CreateSplitPayload {
   owner: string;
   projectId: string;
@@ -14,6 +15,7 @@ export interface CreateSplitPayload {
     basisPoints: number;
   }>;
 }
+
 export interface ProjectHistoryItem {
   id: string;
   type: "round" | "payment";
@@ -23,6 +25,7 @@ export interface ProjectHistoryItem {
   ledgerCloseTime: number;
   txHash: string;
 }
+
 interface BuildSplitResponse {
   xdr: string;
   metadata: {
@@ -30,6 +33,7 @@ interface BuildSplitResponse {
     contractId: string;
   };
 }
+
 function toErrorMessage(status: number, payload: unknown, fallback: string) {
   if (payload && typeof payload === "object" && "message" in payload) {
     const message = (payload as { message?: unknown }).message;
@@ -39,6 +43,7 @@ function toErrorMessage(status: number, payload: unknown, fallback: string) {
   }
   return `${fallback} (status ${status})`;
 }
+
 export async function buildCreateSplitXdr(payload: CreateSplitPayload): Promise<BuildSplitResponse> {
   const response = await fetch(`${API_BASE_URL}/splits`, {
     method: "POST",
@@ -51,7 +56,7 @@ export async function buildCreateSplitXdr(payload: CreateSplitPayload): Promise<
   }
   return body as BuildSplitResponse;
 }
-// SplitProject is imported from ./stellar
+
 export async function buildDistributeXdr(projectId: string, sourceAddress: string): Promise<BuildSplitResponse> {
   const response = await fetch(`${API_BASE_URL}/splits/${encodeURIComponent(projectId)}/distribute`, {
     method: "POST",
@@ -64,6 +69,7 @@ export async function buildDistributeXdr(projectId: string, sourceAddress: strin
   }
   return body as BuildSplitResponse;
 }
+
 export async function buildLockProjectXdr(projectId: string, owner: string): Promise<BuildSplitResponse> {
   const response = await fetch(`${API_BASE_URL}/splits/${encodeURIComponent(projectId)}/lock`, {
     method: "POST",
@@ -76,6 +82,7 @@ export async function buildLockProjectXdr(projectId: string, owner: string): Pro
   }
   return body as BuildSplitResponse;
 }
+
 export async function buildDepositXdr(
   projectId: string,
   from: string,
@@ -92,6 +99,25 @@ export async function buildDepositXdr(
   }
   return body as BuildSplitResponse;
 }
+
+export async function buildUpdateMetadataXdr(
+  projectId: string,
+  owner: string,
+  title: string,
+  projectType: string
+): Promise<BuildSplitResponse> {
+  const response = await fetch(`${API_BASE_URL}/splits/${encodeURIComponent(projectId)}/metadata`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, title, projectType })
+  });
+  const body = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    throw new Error(toErrorMessage(response.status, body, "Failed to build metadata update transaction"));
+  }
+  return body as BuildSplitResponse;
+}
+
 export async function getSplit(projectId: string): Promise<SplitProject> {
   const response = await fetch(`${API_BASE_URL}/splits/${encodeURIComponent(projectId)}`);
   const body = (await response.json().catch(() => null)) as unknown;
@@ -100,12 +126,31 @@ export async function getSplit(projectId: string): Promise<SplitProject> {
   }
   return body as SplitProject;
 }
+
+export async function getAllSplits(): Promise<SplitProject[]> {
+  const response = await fetch(`${API_BASE_URL}/splits`);
+  const body = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    throw new Error(toErrorMessage(response.status, body, "Failed to fetch projects"));
+  }
+  return body as SplitProject[];
+}
+
+export async function getClaimable(projectId: string, address: string): Promise<{ claimed: number; claimable: number }> {
+  const response = await fetch(`${API_BASE_URL}/splits/${encodeURIComponent(projectId)}/claimable/${encodeURIComponent(address)}`);
+  const body = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    throw new Error(toErrorMessage(response.status, body, "Failed to fetch claimable info"));
+  }
+  return body as { claimed: number; claimable: number };
+}
+
 export async function getProjectHistory(
   projectId: string,
-): Promise<ProjectHistoryItem[]> {
+): Promise<{ items: ProjectHistoryItem[] }> {
   const response = await fetch(`${API_BASE_URL}/splits/${encodeURIComponent(projectId)}/history`);
   if (!response.ok) {
     throw new Error("Failed to fetch project history");
   }
-  return (await response.json()) as ProjectHistoryItem[];
+  return (await response.json()) as { items: ProjectHistoryItem[] };
 }
