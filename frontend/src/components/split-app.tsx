@@ -9,6 +9,7 @@ import {
   buildDepositXdr,
   buildDistributeXdr,
   buildLockProjectXdr,
+  buildUpdateMetadataXdr,
   getAllSplits,
   getClaimable,
   getProjectHistory,
@@ -17,13 +18,11 @@ import {
 } from "@/lib/api";
 import { isOwner } from "@/lib/address";
 import {
-  connectFreighter,
-  getFreighterWalletState,
   signWithFreighter,
-  type WalletState,
 } from "@/lib/freighter";
 import { type SplitProject } from "@/lib/stellar";
-import { useToast } from "./toast-provider";
+import { useWallet } from "@/hooks/useWallet";
+import { notify } from "@/lib/notification";
 import { TokenSelector } from "./TypeSelector";
 
 interface CollaboratorInput {
@@ -49,13 +48,8 @@ const SEEDED_PROJECT_IDS = [
 ];
 
 export function SplitApp() {
-  const { showToast } = useToast();
+  const { wallet, connect, refresh } = useWallet();
 
-  const [wallet, setWallet] = useState<WalletState>({
-    connected: false,
-    address: null,
-    network: null,
-  });
   const [projectId, setProjectId] = useState("");
   const [title, setTitle] = useState("");
   const [projectType, setProjectType] = useState("music");
@@ -89,6 +83,12 @@ export function SplitApp() {
   const [projectsList, setProjectsList] = useState<SplitProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isLoadingProjectsList, setIsLoadingProjectsList] = useState(false);
+
+  // Metadata editing state
+  const [isEditingMetadata, setIsEditingMetadata] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editProjectType, setEditProjectType] = useState("music");
+  const [isUpdatingMetadata, setIsUpdatingMetadata] = useState(false);
 
   // Earnings Dashboard state
   const [dashboardData, setDashboardData] = useState<SplitProject[]>([]);
@@ -161,44 +161,80 @@ export function SplitApp() {
     [totalBasisPoints, validationErrors, collaborators.length]
   );
 
-  useEffect(() => {
-    void getFreighterWalletState()
-      .then(setWallet)
-      .catch(() => {
-        setWallet({ connected: false, address: null, network: null });
-      });
-  }, []);
+  // Note: wallet state and synchronization is now handled by the root WalletProvider and useWallet hook.
 
   async function onConnectWallet() {
     try {
-      const state = await connectFreighter();
-      setWallet(state);
-      showToast("Wallet connected.", "success");
+      await connect();
+      notify.success("Wallet connected.");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Wallet connection failed.";
-      showToast(message, "error");
+      notify.error(message);
     }
   }
 
   async function onReconnectWallet() {
     try {
-      const state = await getFreighterWalletState();
-      setWallet(state);
-      showToast(
-        state.connected ? "Wallet reconnected." : "Wallet not authorized.",
-        "info",
-      );
+      await refresh();
+      notify.info(wallet.connected ? "Wallet reconnected." : "Wallet not authorized.");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Wallet refresh failed.";
-      showToast(message, "error");
+      notify.error(message);
     }
   }
 
   function onDisconnectWallet() {
-    setWallet({ connected: false, address: null, network: null });
-    showToast("Wallet disconnected.", "info");
+    // Note: useWallet doesn't have a disconnect method yet as Freighter doesn't support it well,
+    // but we can refresh to get current state or just notify.
+    notify.info("Freighter does not support programmatic disconnect. Use the extension to revoke access.");
+  }
+
+  async function onUpdateMetadata() {
+    if (!fetchedProject || !wallet.address) return;
+    if (!editTitle.trim()) {
+      notify.error("Title is required.");
+      return;
+    }
+
+    setIsUpdatingMetadata(true);
+    try {
+      const buildResponse = await buildUpdateMetadataXdr(
+        fetchedProject.projectId,
+        wallet.address,
+        editTitle.trim(),
+        editProjectType.trim()
+      );
+
+      const signedTxXdr = await signWithFreighter(
+        buildResponse.xdr,
+        buildResponse.metadata.networkPassphrase
+      );
+
+      const server = new rpc.Server(
+        process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org",
+        { allowHttp: true }
+      );
+      const transaction = new Transaction(
+        signedTxXdr,
+        buildResponse.metadata.networkPassphrase
+      );
+      const submitResponse = await server.sendTransaction(transaction);
+
+      if (submitResponse.status === "ERROR") {
+        throw new Error(submitResponse.errorResult?.toString() ?? "Transaction failed.");
+      }
+
+      notify.success("Project metadata updated successfully.");
+      setIsEditingMetadata(false);
+      await onFetchProject();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to update metadata.";
+      notify.error(message);
+    } finally {
+      setIsUpdatingMetadata(false);
+    }
   }
 
   function onWizardNext() {
@@ -252,11 +288,11 @@ export function SplitApp() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!wallet.connected || !wallet.address) {
-      showToast("Connect Freighter wallet first.", "error");
+      notify.error("Connect Freighter wallet first.");
       return;
     }
     if (!isValid) {
-      showToast("Please fix the validation errors.", "error");
+      notify.error("Please fix the validation errors.");
       return;
     }
     const collaboratorPayload = collaborators.map((collaborator) => ({
@@ -296,7 +332,7 @@ export function SplitApp() {
         );
       }
       setTxHash(submitResponse.hash ?? null);
-      showToast("Split project created successfully.", "success");
+      notify.success("Split project created successfully.");
 
       // Fetch and store the created project details
       try {
@@ -313,7 +349,7 @@ export function SplitApp() {
         error instanceof Error
           ? error.message
           : "Failed to create split project.";
-      showToast(message, "error");
+      notify.error(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -341,7 +377,7 @@ export function SplitApp() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to fetch project.";
-      showToast(message, "error");
+      notify.error(message);
       setFetchedProject(null);
     } finally {
       setIsFetchingProject(false);
@@ -379,12 +415,12 @@ export function SplitApp() {
         );
       }
       setTxHash(submitResponse.hash ?? null);
-      showToast("Distribution initiated successfully.", "success");
+      notify.success("Distribution initiated successfully.");
       await onFetchProject();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Distribution failed.";
-      showToast(message, "error");
+      notify.error(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -473,10 +509,10 @@ export function SplitApp() {
       setTxHash(submitResponse.hash ?? null);
       setFetchedProject((prev) => (prev ? { ...prev, locked: true } : prev));
       setShowLockModal(false);
-      showToast("Project locked permanently.", "success");
+      notify.success("Project locked permanently.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to lock project.";
-      showToast(message, "error");
+      notify.error(message);
     } finally {
       setIsLocking(false);
     }
@@ -538,7 +574,7 @@ export function SplitApp() {
     }
 
     if (!depositAmount || Number.parseFloat(depositAmount) <= 0) {
-      showToast("Please enter a valid deposit amount.", "error");
+      notify.error("Please enter a valid deposit amount.");
       return;
     }
 
@@ -565,12 +601,12 @@ export function SplitApp() {
       setTxHash(submitResponse.hash ?? null);
       setShowDepositModal(false);
       setDepositAmount("");
-      showToast("Deposit successful!", "success");
+      notify.success("Deposit successful!");
       // Refresh project details to show updated balance
       await onFetchProject();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Deposit failed.";
-      showToast(message, "error");
+      notify.error(message);
     } finally {
       setIsDepositing(false);
     }
@@ -591,11 +627,11 @@ export function SplitApp() {
       }
       setProjectsList(projects);
       if (projects.length === 0) {
-        showToast("No projects found.", "info");
+        notify.info("No projects found.");
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to fetch projects list.";
-      showToast(message, "error");
+      notify.error(message);
     } finally {
       setIsLoadingProjectsList(false);
     }
@@ -626,7 +662,7 @@ export function SplitApp() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load dashboard.";
-      showToast(message, "error");
+      notify.error(message);
     } finally {
       setIsLoadingDashboard(false);
     }
@@ -1307,15 +1343,32 @@ export function SplitApp() {
                         Split locked - immutable
                       </p>
                     </div>
-                  ) : canLockProject ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowLockModal(true)}
-                      className="premium-button rounded-2xl border border-red-400/30 bg-red-500/10 px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 transition hover:bg-red-500/20"
-                    >
-                      Lock Project
-                    </button>
-                  ) : null}
+                  ) : (
+                    <div className="flex gap-2">
+                      {isProjectOwner && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditTitle(fetchedProject.title);
+                            setEditProjectType(fetchedProject.projectType);
+                            setIsEditingMetadata(true);
+                          }}
+                          className="premium-button rounded-2xl border border-white/10 bg-white/5 px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-ink transition hover:bg-white/10"
+                        >
+                          Edit Metadata
+                        </button>
+                      )}
+                      {canLockProject && (
+                        <button
+                          type="button"
+                          onClick={() => setShowLockModal(true)}
+                          className="premium-button rounded-2xl border border-red-400/30 bg-red-500/10 px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 transition hover:bg-red-500/20"
+                        >
+                          Lock Project
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="text-right space-y-1">
                     <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted">
                       Available Funds
@@ -1792,6 +1845,47 @@ export function SplitApp() {
           </div>
         )}
       </div>
+
+        {/* Metadata Edit Modal */}
+        {isEditingMetadata && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
+            <div className="glass-card w-full max-w-lg rounded-[2.5rem] p-10 animate-in zoom-in-95 duration-200">
+              <h2 className="font-display text-2xl mb-8">Edit Project Metadata</h2>
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Project Title</label>
+                  <input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="glass-input w-full rounded-2xl px-5 py-4 text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Category</label>
+                  <TokenSelector
+                    value={editProjectType}
+                    onChange={setEditProjectType}
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => setIsEditingMetadata(false)}
+                    className="flex-1 rounded-2xl border border-white/10 px-6 py-4 text-xs font-bold uppercase tracking-widest hover:bg-white/5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={onUpdateMetadata}
+                    disabled={isUpdatingMetadata || !editTitle.trim()}
+                    className="flex-1 premium-button rounded-2xl bg-white px-6 py-4 text-xs font-bold uppercase tracking-widest text-[#0a0a09] disabled:opacity-50"
+                  >
+                    {isUpdatingMetadata ? "Updating..." : "Save Changes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Distribution Confirmation Modal */}
       {showDistributeModal && fetchedProject && (

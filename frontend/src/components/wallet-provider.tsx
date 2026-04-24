@@ -3,7 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import { WalletContext, useWalletState } from "../hooks/useWallet";
 import { useNetworkGuard } from "../hooks/useNetworkGuard";
-import { useToast } from "./ToastProvider";
+import { useToast } from "./toast-provider";
 
 /**
  * Provides wallet state to the component tree AND fires a toast whenever a
