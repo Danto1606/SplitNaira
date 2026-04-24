@@ -888,61 +888,144 @@ splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, 
   }
 });
 
-splitsRouter.get("/:projectId/claimable/:address", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestId = res.locals.requestId;
-    const { projectId: projectIdRaw, address: addressRaw } = req.params;
-    const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
-    const address = typeof addressRaw === "string" ? addressRaw.trim() : "";
+splitsRouter.get("/:projectId/claimable/:collaborator", async (req: Request, res: Response, next: NextFunction) => {
+   const requestId = res.locals.requestId;
+   const { projectId: projectIdRaw, collaborator: collaboratorRaw } = req.params;
+   const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
+   const collaborator = typeof collaboratorRaw === "string" ? collaboratorRaw.trim() : "";
 
-    if (!projectId || !address) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "projectId and address are required",
-        requestId
-      });
-    }
+   // Input validation
+   if (!projectId) {
+     return res.status(400).json({
+       error: "validation_error",
+       message: "projectId is required",
+       requestId
+     });
+   }
 
-    const config = loadStellarConfig();
-    const server = new rpc.Server(config.sorobanRpcUrl, { allowHttp: true });
+   if (!collaborator) {
+     return res.status(400).json({
+       error: "validation_error",
+       message: "collaborator is required",
+       requestId
+     });
+   }
 
-    let sourceAccount;
-    try {
-      sourceAccount = await executeWithRetry(() => server.getAccount(config.simulatorAccount));
-    } catch {
-      return res.status(500).json({
-        error: "server_error",
-        message: "simulator account not found",
-        requestId
-      });
-    }
+   // Validate projectId format (alphanumeric/underscore)
+   const projectIdResult = projectIdParamSchema.safeParse(projectId);
+   if (!projectIdResult.success) {
+     return res.status(400).json({
+       error: "validation_error",
+       message: "projectId must be alphanumeric/underscore",
+       requestId
+     });
+   }
 
-    const contract = new Contract(config.contractId);
-    const tx = new TransactionBuilder(sourceAccount, {
-      fee: BASE_FEE,
-      networkPassphrase: config.networkPassphrase
-    })
-      .addOperation(
-        contract.call(
-          "get_claimable",
-          nativeToScVal(projectId, { type: "symbol" }),
-          Address.fromString(address).toScVal()
-        )
-      )
-      .setTimeout(300)
-      .build();
+   // Validate collaborator address format
+   let collaboratorAddress;
+   try {
+     collaboratorAddress = Address.fromString(collaborator);
+   } catch {
+     return res.status(400).json({
+       error: "validation_error",
+       message: "must be a valid Stellar address (classic or contract)",
+       requestId
+     });
+   }
 
-    const simulated = await executeWithRetry(() => server.simulateTransaction(tx));
-    const retval = "result" in simulated ? simulated.result?.retval : undefined;
-    if (!retval) {
-      return res.status(404).json({ error: "not_found", message: "Claimable info not found", requestId });
-    }
+   try {
+     const config = loadStellarConfig();
+     const server = getStellarRpcServer();
 
-    return res.status(200).json(scValToNative(retval));
-  } catch (error) {
-    return next(error);
-  }
-});
+     let sourceAccount;
+     try {
+       sourceAccount = await executeWithRetry(() => server.getAccount(config.simulatorAccount));
+     } catch {
+       return res.status(500).json({
+         error: "server_error",
+         message: "simulator account not found",
+         requestId
+       });
+     }
+
+     const contract = new Contract(config.contractId);
+     const projectIdScVal = nativeToScVal(projectId, { type: "symbol" });
+     
+     // Build a transaction with multiple read operations for efficiency
+     // 1. get_project -> for collaborators/basis points
+     // 2. get_balance -> for current undistributed balance
+     // 3. get_claimable -> for claimed amount
+     const tx = new TransactionBuilder(sourceAccount, {
+       fee: BASE_FEE,
+       networkPassphrase: config.networkPassphrase
+     })
+       .addOperation(contract.call("get_project", projectIdScVal))
+       .addOperation(contract.call("get_balance", projectIdScVal))
+       .addOperation(contract.call("get_claimable", projectIdScVal, collaboratorAddress.toScVal()))
+       .setTimeout(300)
+       .build();
+
+     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     const simulated = await executeWithRetry(() => server.simulateTransaction(tx)) as any;
+     
+     if (!simulated.results || simulated.results.length < 3) {
+       return res.status(404).json({
+         error: "not_found",
+         message: `Split project ${projectId} not found or contract call failed`,
+         requestId
+       });
+     }
+
+     // Parse results
+     const projectRetval = simulated.results[0].retval;
+     const balanceRetval = simulated.results[1].retval;
+     const claimableInfoRetval = simulated.results[2].retval;
+
+     if (!projectRetval || !balanceRetval || !claimableInfoRetval) {
+       return res.status(404).json({
+         error: "not_found",
+         message: `Split project ${projectId} not found`,
+         requestId
+       });
+     }
+
+     const project = scValToNative(projectRetval);
+     const balance = scValToNative(balanceRetval);
+     const claimableInfo = scValToNative(claimableInfoRetval);
+
+     // Find collaborator basis points
+     const collaboratorInfo = project.collaborators?.find(
+       (c: any) => c.address === collaborator
+     );
+     const basisPoints = collaboratorInfo ? BigInt(collaboratorInfo.basisPoints || collaboratorInfo.basis_points || 0) : 0n;
+     
+     // Calculate claimable: (balance * basisPoints) / 10000
+     const balanceBigInt = BigInt(balance || 0);
+     const claimableAmount = (balanceBigInt * basisPoints) / 10000n;
+     
+     // Get claimed from claimableInfo
+     const claimedAmount = BigInt(claimableInfo.claimed || 0);
+     
+     // Total is what they've already got + what's waiting for them
+     const totalAmount = claimedAmount + claimableAmount;
+
+     // Return normalized JSON response
+     return res.status(200).json({
+       projectId,
+       collaborator,
+       claimable: claimableAmount.toString(),
+       claimed: claimedAmount.toString(),
+       total: totalAmount.toString()
+     });
+   } catch (error) {
+     console.error(`[claimable] Error fetching claimable info for ${projectId}/${collaborator}:`, error);
+     return res.status(500).json({
+       error: "server_error",
+       message: "Contract call failed",
+       requestId
+     });
+   }
+ });
 
 const adminTokenSchema = z.object({
   admin: stellarAddressSchema.describe("admin"),

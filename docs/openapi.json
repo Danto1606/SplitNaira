@@ -923,6 +923,112 @@
         }
       }
     },
+    "/splits/{projectId}/claimable/{collaborator}": {
+      "get": {
+        "tags": [
+          "splits"
+        ],
+        "summary": "Get claimable payout information for a collaborator",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "afrobeats_001"
+            }
+          },
+          {
+            "name": "collaborator",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "GACCOUNT...",
+              "description": "Stellar address of the collaborator"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Claimable payout information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "projectId",
+                    "collaborator",
+                    "claimable",
+                    "claimed",
+                    "total"
+                  ],
+                  "properties": {
+                    "projectId": {
+                      "type": "string",
+                      "example": "afrobeats_001"
+                    },
+                    "collaborator": {
+                      "type": "string",
+                      "example": "GACCOUNT...",
+                      "description": "Stellar address of the collaborator"
+                    },
+                    "claimable": {
+                      "type": "string",
+                      "example": "1000000",
+                      "description": "Amount claimable by the collaborator (in stroops)"
+                    },
+                    "claimed": {
+                      "type": "string",
+                      "example": "500000",
+                      "description": "Amount already claimed by the collaborator (in stroops)"
+                    },
+                    "total": {
+                      "type": "string",
+                      "example": "2000000",
+                      "description": "Total amount allocated to the collaborator (in stroops)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestIdError" }
+              }
+            }
+          },
+          "404": {
+            "description": "Project not found or collaborator has no claimable info",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestIdError" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestIdError" }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestIdError" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/splits/admin/allow-token": {
       "post": {
         "tags": ["splits"],

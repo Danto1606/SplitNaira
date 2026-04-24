@@ -580,60 +580,185 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
     expect(getAccountMock).not.toHaveBeenCalled();
   });
 
-  it("full lifecycle: same owner can create → update collaborators → lock", async () => {
-    getAccountMock.mockResolvedValue({ accountId: VALID_OWNER });
-    prepareTransactionMock
-      .mockResolvedValueOnce({ toXDR: () => "XDR_CREATE", sequence: "1", fee: "100" })
-      .mockResolvedValueOnce({ toXDR: () => "XDR_UPDATE", sequence: "2", fee: "100" })
-      .mockResolvedValueOnce({ toXDR: () => "XDR_LOCK", sequence: "3", fee: "100" });
+   it("full lifecycle: same owner can create → update collaborators → lock", async () => {
+     getAccountMock.mockResolvedValue({ accountId: VALID_OWNER });
+     prepareTransactionMock
+       .mockResolvedValueOnce({ toXDR: () => "XDR_CREATE", sequence: "1", fee: "100" })
+       .mockResolvedValueOnce({ toXDR: () => "XDR_UPDATE", sequence: "2", fee: "100" })
+       .mockResolvedValueOnce({ toXDR: () => "XDR_LOCK", sequence: "3", fee: "100" });
 
-    const app = createApp();
+     const app = createApp();
 
-    // 1. Create
-    const createRes = await request(app)
-      .post("/splits")
-      .send({
-        owner: VALID_OWNER,
-        projectId: "lifecycle_1",
-        title: "Lifecycle Project",
-        projectType: "music",
-        token: VALID_TOKEN,
-        collaborators: [
-          { address: VALID_COLLAB_A, alias: "A", basisPoints: 5000 },
-          { address: VALID_COLLAB_B, alias: "B", basisPoints: 5000 }
-        ]
-      })
-      .expect(200);
-    expect(createRes.body.metadata.operation).toBe("create_project");
-    expect(createRes.body.metadata.sourceAccount).toBe(VALID_OWNER);
+     // 1. Create
+     const createRes = await request(app)
+       .post("/splits")
+       .send({
+         owner: VALID_OWNER,
+         projectId: "lifecycle_1",
+         title: "Lifecycle Project",
+         projectType: "music",
+         token: VALID_TOKEN,
+         collaborators: [
+           { address: VALID_COLLAB_A, alias: "A", basisPoints: 5000 },
+           { address: VALID_COLLAB_B, alias: "B", basisPoints: 5000 }
+         ]
+       })
+       .expect(200);
+     expect(createRes.body.metadata.operation).toBe("create_project");
+     expect(createRes.body.metadata.sourceAccount).toBe(VALID_OWNER);
 
-    // 2. Update collaborators (still pre-lock)
-    const updateRes = await request(app)
-      .put("/splits/lifecycle_1/collaborators")
-      .send({
-        owner: VALID_OWNER,
-        collaborators: [
-          { address: VALID_COLLAB_A, alias: "A", basisPoints: 3000 },
-          { address: VALID_COLLAB_B, alias: "B", basisPoints: 3000 },
-          { address: VALID_COLLAB_C, alias: "C", basisPoints: 4000 }
-        ]
-      })
-      .expect(200);
-    expect(updateRes.body.metadata.operation).toBe("update_collaborators");
-    expect(updateRes.body.metadata.sourceAccount).toBe(VALID_OWNER);
+     // 2. Update collaborators (still pre-lock)
+     const updateRes = await request(app)
+       .put("/splits/lifecycle_1/collaborators")
+       .send({
+         owner: VALID_OWNER,
+         collaborators: [
+           { address: VALID_COLLAB_A, alias: "A", basisPoints: 3000 },
+           { address: VALID_COLLAB_B, alias: "B", basisPoints: 3000 },
+           { address: VALID_COLLAB_C, alias: "C", basisPoints: 4000 }
+         ]
+       })
+       .expect(200);
+     expect(updateRes.body.metadata.operation).toBe("update_collaborators");
+     expect(updateRes.body.metadata.sourceAccount).toBe(VALID_OWNER);
 
-    // 3. Lock
-    const lockRes = await request(app)
-      .post("/splits/lifecycle_1/lock")
-      .send({ owner: VALID_OWNER })
-      .expect(200);
-    expect(lockRes.body.metadata.operation).toBe("lock_project");
-    expect(lockRes.body.metadata.sourceAccount).toBe(VALID_OWNER);
+     // 3. Lock
+     const lockRes = await request(app)
+       .post("/splits/lifecycle_1/lock")
+       .send({ owner: VALID_OWNER })
+       .expect(200);
+     expect(lockRes.body.metadata.operation).toBe("lock_project");
+     expect(lockRes.body.metadata.sourceAccount).toBe(VALID_OWNER);
 
-    // All 3 ops called getAccount with the same owner address
-    const ownerCalls = getAccountMock.mock.calls.filter(
-      (call) => call[0] === VALID_OWNER
-    );
-    expect(ownerCalls.length).toBe(3);
-  });
-});
+     // All 3 ops called getAccount with the same owner address
+     const ownerCalls = getAccountMock.mock.calls.filter(
+       (call) => call[0] === VALID_OWNER
+     );
+     expect(ownerCalls.length).toBe(3);
+   });
+
+   // ============================================================
+   //  CLAIMABLE ENDPOINT TESTS
+   // ============================================================
+
+   it("returns claimable info for valid project and collaborator", async () => {
+     getAccountMock.mockResolvedValue({ accountId: "GSIM" });
+     
+     // Mock the contract calls return values in simulated results
+     // results[0] -> get_project
+     // results[1] -> get_balance
+     // results[2] -> get_claimable
+     simulateTransactionMock.mockResolvedValue({
+       results: [
+         {
+           retval: {
+             collaborators: [
+               { address: "GCOLLAB1", basisPoints: 5000 }
+             ]
+           }
+         },
+         {
+           retval: 1000000 // balance
+         },
+         {
+           retval: {
+             claimed: 500000
+           }
+         }
+       ]
+     });
+
+     const app = createApp();
+
+     const response = await request(app)
+       .get("/splits/project_1/claimable/GCOLLAB1")
+       .expect(200);
+
+     // claimable = (1000000 * 5000) / 10000 = 500000
+     // claimed = 500000
+     // total = 500000 + 500000 = 1000000
+     expect(response.body).toMatchObject({
+       projectId: "project_1",
+       collaborator: "GCOLLAB1",
+       claimable: "500000",
+       claimed: "500000",
+       total: "1000000"
+     });
+
+     expect(getAccountMock).toHaveBeenCalledWith("GTESTSIMULATOR");
+   });
+
+   it("returns 400 for invalid collaborator address", async () => {
+     const { Address } = await import("@stellar/stellar-sdk");
+     vi.mocked(Address.fromString).mockImplementationOnce(() => {
+       throw new Error("Invalid address");
+     });
+
+     const app = createApp();
+
+     const response = await request(app)
+       .get("/splits/project_1/claimable/invalid_address")
+       .expect(400);
+
+     expect(response.body.error).toBe("validation_error");
+     expect(response.body.message).toMatch(/must be a valid Stellar address/);
+   });
+
+   it("returns 400 for missing projectId", async () => {
+     const app = createApp();
+
+     // Use a path that definitely matches the route but has empty projectId if possible
+     // Actually, in Express /splits//claimable/GCOLLAB1 usually doesn't match /splits/:projectId/claimable/:collaborator
+     // Let's test with a project ID that fails the regex instead, to verify 400
+     const response = await request(app)
+       .get("/splits/!!!/claimable/GCOLLAB1")
+       .expect(400);
+
+     expect(response.body.error).toBe("validation_error");
+     expect(response.body.message).toMatch(/projectId must be alphanumeric/);
+   });
+
+   it("returns 400 for invalid projectId format", async () => {
+     const app = createApp();
+
+     const response = await request(app)
+       .get("/splits/project_id!/claimable/GCOLLAB1") // Invalid chars
+       .expect(400);
+
+     expect(response.body.error).toBe("validation_error");
+     expect(response.body.message).toMatch(/projectId must be alphanumeric/);
+   });
+
+   it("returns 404 when project not found", async () => {
+     getAccountMock.mockResolvedValue({ accountId: "GSIM" });
+     
+     // Mock contract call to return no value (project not found)
+     simulateTransactionMock.mockResolvedValue({
+       results: [] // Empty results or missing retval
+     });
+
+     const app = createApp();
+
+     const response = await request(app)
+       .get("/splits/nonexistent/claimable/GCOLLAB1")
+       .expect(404);
+
+     expect(response.body.error).toBe("not_found");
+   });
+
+   it("handles contract call errors with 500 status", async () => {
+     getAccountMock.mockResolvedValue({ accountId: "GSIM" });
+     
+     // Mock contract call to throw an error
+     simulateTransactionMock.mockRejectedValue(new Error("Contract execution failed"));
+
+     const app = createApp();
+
+     // Increase timeout for this test because of retries
+     const response = await request(app)
+       .get("/splits/project_1/claimable/GCOLLAB1")
+       .expect(500);
+
+     expect(response.body.error).toBe("server_error");
+   }, 15000); // 15s timeout for retries
+ });
