@@ -40,6 +40,13 @@ jobs:
       - run: npm run lint -w backend
       - run: npm run build -w backend
       - run: npm run test -w backend -- --reporter=verbose
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run deps:check
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:compat -- --reporter=verbose
+      - run: npm run test -- --reporter=verbose
 
   contracts:
     runs-on: ubuntu-latest
