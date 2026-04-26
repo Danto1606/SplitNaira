@@ -3,12 +3,11 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
-import rateLimit from "express-rate-limit";
-
 import { healthRouter } from "./routes/health.js";
 import { splitsRouter } from "./routes/splits.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
+import { readLimiter, writeLimiter, adminLimiter } from "./middleware/rate-limit.js";
 import { validateEnv, printEnvDiagnostics } from "./config/env.js";
 import { initDatabase, closeDatabase } from "./services/database.js";
 import { logger } from "./services/logger.js";
@@ -24,21 +23,6 @@ const corsOrigins = process.env.CORS_ORIGIN
   : ["http://localhost:3000"];
 
 const corsOrigin = corsOrigins.length > 0 ? corsOrigins : false;
-
-const publicLimiter = rateLimit({
-  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000),
-  limit: Number(process.env.RATE_LIMIT_MAX ?? 100),
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    const requestId = res.locals.requestId;
-    res.status(429).json({
-      error: "rate_limited",
-      message: "Too many requests.",
-      requestId
-    });
-  }
-});
 
 app.use(helmet());
 app.use(cors({ origin: corsOrigin }));
@@ -60,7 +44,12 @@ app.use(
   })
 );
 
-app.use(["/health", "/splits"], publicLimiter);
+app.use("/health", readLimiter);
+app.use("/splits/admin", adminLimiter);
+app.use("/splits", (req, res, next) => {
+  if (req.method === "GET") return readLimiter(req, res, next);
+  return writeLimiter(req, res, next);
+});
 
 app.get("/", (_req, res) => {
   res.json({
