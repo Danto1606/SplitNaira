@@ -15,7 +15,7 @@ const serverMock = {
   getAccount: getAccountMock,
   prepareTransaction: prepareTransactionMock,
   simulateTransaction: simulateTransactionMock,
-  getEvents: getEventsMock
+  getEvents: getEventsMock,
 };
 
 vi.mock("@stellar/stellar-sdk", () => {
@@ -31,12 +31,12 @@ vi.mock("@stellar/stellar-sdk", () => {
   return {
     Address: {
       fromString: vi.fn((address: string) => ({
-        toScVal: () => ({ address })
-      }))
+        toScVal: () => ({ address }),
+      })),
     },
     BASE_FEE: 100,
     Contract: vi.fn().mockImplementation(() => ({
-      call: (method: string, ...args: unknown[]) => ({ method, args })
+      call: (method: string, ...args: unknown[]) => ({ method, args }),
     })),
     TransactionBuilder: vi.fn().mockImplementation(() => ({
       addOperation: function (op: unknown) {
@@ -48,26 +48,26 @@ vi.mock("@stellar/stellar-sdk", () => {
       },
       build: function () {
         return { preparedOperation: this.op };
-      }
+      },
     })),
     nativeToScVal: vi.fn((value: unknown) => ({
-      toXDR: () => `MOCKED_XDR_${value}`
+      toXDR: () => `MOCKED_XDR_${value}`,
     })),
     scValToNative: vi.fn((value: unknown) => value),
     rpc: {
-      Server: vi.fn(() => serverMock)
+      Server: vi.fn(() => serverMock),
     },
     Address: vi.fn().mockImplementation((address: string) => ({
-      toScVal: () => ({ toXDR: () => `MOCKED_SCVAL_${address}` })
+      toScVal: () => ({ toXDR: () => `MOCKED_SCVAL_${address}` }),
     })),
     xdr: {
       ScVal: {
         scvMap: (items: unknown[]) => items,
         scvU32: (value: number) => value,
-        scvVec: (items: unknown[]) => items
+        scvVec: (items: unknown[]) => items,
       },
-      ScMapEntry
-    }
+      ScMapEntry,
+    },
   };
 });
 
@@ -85,7 +85,8 @@ beforeAll(() => {
   process.env.HORIZON_URL = "https://horizon.test";
   process.env.SOROBAN_RPC_URL = "https://soroban.test";
   process.env.SOROBAN_NETWORK_PASSPHRASE = "test";
-  process.env.CONTRACT_ID = "CBLASIRZ7CUKC7S5IS3VSNMQGKZ5FTRWLHZZXH7H4YG6ZLRFPJF5H2LR";
+  process.env.CONTRACT_ID =
+    "CBLASIRZ7CUKC7S5IS3VSNMQGKZ5FTRWLHZZXH7H4YG6ZLRFPJF5H2LR";
   process.env.SIMULATOR_ACCOUNT = "test_account";
 });
 
@@ -99,7 +100,7 @@ describe("splits routes integration", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_CREATE",
       sequence: "123",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -112,11 +113,14 @@ describe("splits routes integration", () => {
       token: "GTOKENADDRESS",
       collaborators: [
         { address: "GCOLLAB1", alias: "A", basisPoints: 5000 },
-        { address: "GCOLLAB2", alias: "B", basisPoints: 5000 }
-      ]
+        { address: "GCOLLAB2", alias: "B", basisPoints: 5000 },
+      ],
     };
 
-    const response = await request(app).post("/splits").send(createPayload).expect(200);
+    const response = await request(app)
+      .post("/splits")
+      .send(createPayload)
+      .expect(200);
 
     expect(response.body).toMatchObject({
       xdr: "XDR_CREATE",
@@ -124,8 +128,8 @@ describe("splits routes integration", () => {
         contractId: "TESTCONTRACT",
         networkPassphrase: "Test SDF Network",
         sourceAccount: "GOWNER",
-        operation: "create_project"
-      }
+        operation: "create_project",
+      },
     });
 
     expect(getAccountMock).toHaveBeenCalledWith("GOWNER");
@@ -136,7 +140,7 @@ describe("splits routes integration", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_LOCK",
       sequence: "456",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -150,8 +154,8 @@ describe("splits routes integration", () => {
       xdr: "XDR_LOCK",
       metadata: {
         operation: "lock_project",
-        sourceAccount: "GOWNER"
-      }
+        sourceAccount: "GOWNER",
+      },
     });
 
     expect(getAccountMock).toHaveBeenCalledWith("GOWNER");
@@ -162,7 +166,7 @@ describe("splits routes integration", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_DISTRIBUTE",
       sequence: "789",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -176,8 +180,8 @@ describe("splits routes integration", () => {
       xdr: "XDR_DISTRIBUTE",
       metadata: {
         operation: "distribute",
-        sourceAccount: "GDISP"
-      }
+        sourceAccount: "GDISP",
+      },
     });
 
     expect(getAccountMock).toHaveBeenCalledWith("GDISP");
@@ -187,20 +191,19 @@ describe("splits routes integration", () => {
     getAccountMock.mockResolvedValue({ accountId: "GSIM" });
     simulateTransactionMock.mockResolvedValue({
       result: {
-        retval: [
-          { projectId: "project_1" },
-          { projectId: "project_2" }
-        ]
-      }
+        retval: [{ projectId: "project_1" }, { projectId: "project_2" }],
+      },
     });
 
     const app = createApp();
 
-    const response = await request(app).get("/splits?start=0&limit=10").expect(200);
+    const response = await request(app)
+      .get("/splits?start=0&limit=10")
+      .expect(200);
 
     expect(response.body).toEqual([
       { projectId: "project_1" },
-      { projectId: "project_2" }
+      { projectId: "project_2" },
     ]);
 
     expect(getAccountMock).toHaveBeenCalledWith("GTESTSIMULATOR");
@@ -210,15 +213,18 @@ describe("splits routes integration", () => {
     getAccountMock.mockResolvedValue({ accountId: "GSIM" });
     simulateTransactionMock.mockResolvedValue({
       result: {
-        retval: { projectId: "project_1", title: "Project 1" }
-      }
+        retval: { projectId: "project_1", title: "Project 1" },
+      },
     });
 
     const app = createApp();
 
     const response = await request(app).get("/splits/project_1").expect(200);
 
-    expect(response.body).toEqual({ projectId: "project_1", title: "Project 1" });
+    expect(response.body).toEqual({
+      projectId: "project_1",
+      title: "Project 1",
+    });
     expect(getAccountMock).toHaveBeenCalledWith("GTESTSIMULATOR");
   });
 
@@ -227,18 +233,18 @@ describe("splits routes integration", () => {
     simulateTransactionMock
       .mockResolvedValueOnce({
         result: {
-          retval: "GADMIN"
-        }
+          retval: "GADMIN",
+        },
       })
       .mockResolvedValueOnce({
         result: {
-          retval: 2
-        }
+          retval: 2,
+        },
       })
       .mockResolvedValueOnce({
         result: {
-          retval: ["GTOKEN_1", "GTOKEN_2"]
-        }
+          retval: ["GTOKEN_1", "GTOKEN_2"],
+        },
       });
 
     const app = createApp();
@@ -252,7 +258,7 @@ describe("splits routes integration", () => {
       allowedTokenCount: 2,
       tokens: ["GTOKEN_1", "GTOKEN_2"],
       start: 0,
-      limit: 25
+      limit: 25,
     });
 
     expect(getAccountMock).toHaveBeenCalledWith("GTESTSIMULATOR");
@@ -264,7 +270,7 @@ describe("splits routes integration", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_ALLOW_TOKEN",
       sequence: "100",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -280,8 +286,8 @@ describe("splits routes integration", () => {
         contractId: "TESTCONTRACT",
         networkPassphrase: "Test SDF Network",
         sourceAccount: "GADMIN",
-        operation: "allow_token"
-      }
+        operation: "allow_token",
+      },
     });
 
     expect(getAccountMock).toHaveBeenCalledWith("GADMIN");
@@ -292,7 +298,7 @@ describe("splits routes integration", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_DISALLOW_TOKEN",
       sequence: "101",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -308,8 +314,8 @@ describe("splits routes integration", () => {
         contractId: "TESTCONTRACT",
         networkPassphrase: "Test SDF Network",
         sourceAccount: "GADMIN",
-        operation: "disallow_token"
-      }
+        operation: "disallow_token",
+      },
     });
 
     expect(getAccountMock).toHaveBeenCalledWith("GADMIN");
@@ -370,7 +376,7 @@ describe("splits routes integration", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_PAUSE_DISTRIBUTIONS",
       sequence: "102",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -383,8 +389,8 @@ describe("splits routes integration", () => {
       xdr: "XDR_PAUSE_DISTRIBUTIONS",
       metadata: {
         sourceAccount: "GADMIN",
-        operation: "pause_distributions"
-      }
+        operation: "pause_distributions",
+      },
     });
   });
 
@@ -393,7 +399,7 @@ describe("splits routes integration", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_UNPAUSE_DISTRIBUTIONS",
       sequence: "103",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -406,8 +412,8 @@ describe("splits routes integration", () => {
       xdr: "XDR_UNPAUSE_DISTRIBUTIONS",
       metadata: {
         sourceAccount: "GADMIN",
-        operation: "unpause_distributions"
-      }
+        operation: "unpause_distributions",
+      },
     });
   });
 
@@ -421,9 +427,9 @@ describe("splits routes integration", () => {
             value: [2, 100],
             txHash: "TX2",
             ledgerClosedAt: "2025-01-02T00:00:00Z",
-            id: "round-2"
-          }
-        ]
+            id: "round-2",
+          },
+        ],
       })
       .mockResolvedValueOnce({
         events: [
@@ -431,14 +437,16 @@ describe("splits routes integration", () => {
             value: ["GUSER", 50],
             txHash: "TX1",
             ledgerClosedAt: "2025-01-01T00:00:00Z",
-            id: "payment-1"
-          }
-        ]
+            id: "payment-1",
+          },
+        ],
       });
 
     const app = createApp();
 
-    const response = await request(app).get("/splits/project_1/history").expect(200);
+    const response = await request(app)
+      .get("/splits/project_1/history")
+      .expect(200);
 
     expect(response.body).toEqual({
       items: [
@@ -448,7 +456,7 @@ describe("splits routes integration", () => {
           amount: "100",
           txHash: "TX2",
           ledgerCloseTime: "2025-01-02T00:00:00Z",
-          id: "round-2"
+          id: "round-2",
         },
         {
           type: "payment",
@@ -456,10 +464,10 @@ describe("splits routes integration", () => {
           amount: "50",
           txHash: "TX1",
           ledgerCloseTime: "2025-01-01T00:00:00Z",
-          id: "payment-1"
-        }
+          id: "payment-1",
+        },
       ],
-      nextCursor: null
+      nextCursor: null,
     });
 
     expect(getEventsMock).toHaveBeenCalledTimes(2);
@@ -482,7 +490,7 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_LOCK",
       sequence: "1",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -536,7 +544,7 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_UPDATE",
       sequence: "2",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -546,8 +554,8 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
         owner: VALID_OWNER,
         collaborators: [
           { address: VALID_COLLAB_A, alias: "A", basisPoints: 6000 },
-          { address: VALID_COLLAB_B, alias: "B", basisPoints: 4000 }
-        ]
+          { address: VALID_COLLAB_B, alias: "B", basisPoints: 4000 },
+        ],
       })
       .expect(200);
 
@@ -563,8 +571,8 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
       .send({
         collaborators: [
           { address: VALID_COLLAB_A, alias: "A", basisPoints: 5000 },
-          { address: VALID_COLLAB_B, alias: "B", basisPoints: 5000 }
-        ]
+          { address: VALID_COLLAB_B, alias: "B", basisPoints: 5000 },
+        ],
       })
       .expect(400);
 
@@ -580,8 +588,8 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
         owner: VALID_OWNER,
         collaborators: [
           { address: VALID_COLLAB_A, alias: "A", basisPoints: 6000 },
-          { address: VALID_COLLAB_B, alias: "B", basisPoints: 3000 }
-        ]
+          { address: VALID_COLLAB_B, alias: "B", basisPoints: 3000 },
+        ],
       })
       .expect(400);
 
@@ -597,8 +605,8 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
         owner: VALID_OWNER,
         collaborators: [
           { address: VALID_COLLAB_A, alias: "A", basisPoints: 5000 },
-          { address: VALID_COLLAB_A, alias: "A2", basisPoints: 5000 }
-        ]
+          { address: VALID_COLLAB_A, alias: "A2", basisPoints: 5000 },
+        ],
       })
       .expect(400);
 
@@ -613,8 +621,8 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
       .send({
         owner: VALID_OWNER,
         collaborators: [
-          { address: VALID_COLLAB_A, alias: "A", basisPoints: 10000 }
-        ]
+          { address: VALID_COLLAB_A, alias: "A", basisPoints: 10000 },
+        ],
       })
       .expect(400);
 
@@ -625,9 +633,21 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
   it("full lifecycle: same owner can create → update collaborators → lock", async () => {
     getAccountMock.mockResolvedValue({ accountId: VALID_OWNER });
     prepareTransactionMock
-      .mockResolvedValueOnce({ toXDR: () => "XDR_CREATE", sequence: "1", fee: "100" })
-      .mockResolvedValueOnce({ toXDR: () => "XDR_UPDATE", sequence: "2", fee: "100" })
-      .mockResolvedValueOnce({ toXDR: () => "XDR_LOCK", sequence: "3", fee: "100" });
+      .mockResolvedValueOnce({
+        toXDR: () => "XDR_CREATE",
+        sequence: "1",
+        fee: "100",
+      })
+      .mockResolvedValueOnce({
+        toXDR: () => "XDR_UPDATE",
+        sequence: "2",
+        fee: "100",
+      })
+      .mockResolvedValueOnce({
+        toXDR: () => "XDR_LOCK",
+        sequence: "3",
+        fee: "100",
+      });
 
     const app = createApp();
 
@@ -642,8 +662,8 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
         token: VALID_TOKEN,
         collaborators: [
           { address: VALID_COLLAB_A, alias: "A", basisPoints: 5000 },
-          { address: VALID_COLLAB_B, alias: "B", basisPoints: 5000 }
-        ]
+          { address: VALID_COLLAB_B, alias: "B", basisPoints: 5000 },
+        ],
       })
       .expect(200);
     expect(createRes.body.metadata.operation).toBe("create_project");
@@ -657,8 +677,8 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
         collaborators: [
           { address: VALID_COLLAB_A, alias: "A", basisPoints: 3000 },
           { address: VALID_COLLAB_B, alias: "B", basisPoints: 3000 },
-          { address: VALID_COLLAB_C, alias: "C", basisPoints: 4000 }
-        ]
+          { address: VALID_COLLAB_C, alias: "C", basisPoints: 4000 },
+        ],
       })
       .expect(200);
     expect(updateRes.body.metadata.operation).toBe("update_collaborators");
@@ -674,7 +694,7 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
 
     // All 3 ops called getAccount with the same owner address
     const ownerCalls = getAccountMock.mock.calls.filter(
-      (call) => call[0] === VALID_OWNER
+      (call) => call[0] === VALID_OWNER,
     );
     expect(ownerCalls.length).toBe(3);
   });
@@ -687,7 +707,7 @@ describe("Issue #174: lock & update permissions and owner gating", () => {
 describe("admin contract-state read routes", () => {
   it("GET /splits/admin/status returns admin address and pause status", async () => {
     simulateTransactionMock.mockResolvedValue({
-      result: { retval: "GADMIN" }
+      result: { retval: "GADMIN" },
     });
     getAccountMock.mockResolvedValue({ accountId: "GTESTSIMULATOR" });
 
@@ -700,7 +720,7 @@ describe("admin contract-state read routes", () => {
 
   it("GET /splits/admin/is-token-allowed returns allowlist status for a valid token", async () => {
     simulateTransactionMock.mockResolvedValue({
-      result: { retval: true }
+      result: { retval: true },
     });
     getAccountMock.mockResolvedValue({ accountId: "GTESTSIMULATOR" });
 
@@ -716,13 +736,15 @@ describe("admin contract-state read routes", () => {
 
   it("GET /splits/admin/is-token-allowed returns 400 for a missing token param", async () => {
     const app = createApp();
-    const res = await request(app).get("/splits/admin/is-token-allowed").expect(400);
+    const res = await request(app)
+      .get("/splits/admin/is-token-allowed")
+      .expect(400);
     expect(res.body.error).toBe("validation_error");
   });
 
   it("GET /splits/admin/token-count returns allowed token count", async () => {
     simulateTransactionMock.mockResolvedValue({
-      result: { retval: 3 }
+      result: { retval: 3 },
     });
     getAccountMock.mockResolvedValue({ accountId: "GTESTSIMULATOR" });
 
@@ -738,13 +760,15 @@ describe("admin contract-state read routes", () => {
 // ============================================================
 
 describe("unallocated token recovery routes", () => {
-  const VALID_ADMIN = "GADMIN00000000000000000000000000000000000000000000000001";
-  const VALID_TOKEN = "CTOKEN00000000000000000000000000000000000000000000000001";
+  const VALID_ADMIN =
+    "GADMIN00000000000000000000000000000000000000000000000001";
+  const VALID_TOKEN =
+    "CTOKEN00000000000000000000000000000000000000000000000001";
   const VALID_TO = "GRECOVER0000000000000000000000000000000000000000000000001";
 
   it("GET /splits/admin/unallocated returns recoverable balance for a valid token", async () => {
     simulateTransactionMock.mockResolvedValue({
-      result: { retval: 500_000 }
+      result: { retval: 500_000 },
     });
     getAccountMock.mockResolvedValue({ accountId: "GTESTSIMULATOR" });
 
@@ -768,7 +792,7 @@ describe("unallocated token recovery routes", () => {
     prepareTransactionMock.mockResolvedValue({
       toXDR: () => "XDR_WITHDRAW_UNALLOCATED",
       sequence: "999",
-      fee: "100"
+      fee: "100",
     });
 
     const app = createApp();
@@ -778,7 +802,7 @@ describe("unallocated token recovery routes", () => {
         admin: VALID_ADMIN,
         token: VALID_TOKEN,
         to: VALID_TO,
-        amount: 250_000
+        amount: 250_000,
       })
       .expect(200);
 
@@ -787,7 +811,7 @@ describe("unallocated token recovery routes", () => {
     expect(res.body.metadata.auditContext).toMatchObject({
       token: VALID_TOKEN,
       destination: VALID_TO,
-      amount: 250_000
+      amount: 250_000,
     });
     expect(res.body.metadata.auditContext.initiatedAt).toBeDefined();
     expect(getAccountMock).toHaveBeenCalledWith(VALID_ADMIN);
@@ -807,7 +831,12 @@ describe("unallocated token recovery routes", () => {
     const app = createApp();
     const res = await request(app)
       .post("/splits/admin/withdraw-unallocated")
-      .send({ admin: VALID_ADMIN, token: VALID_TOKEN, to: VALID_TO, amount: -1 })
+      .send({
+        admin: VALID_ADMIN,
+        token: VALID_TOKEN,
+        to: VALID_TO,
+        amount: -1,
+      })
       .expect(400);
 
     expect(res.body.error).toBe("validation_error");
