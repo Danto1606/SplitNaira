@@ -1471,6 +1471,247 @@ fn test_update_project_metadata_emits_event() {
 }
 
 // ============================================================
+//  ISSUE #172 - UPGRADE-SAFETY REGRESSION TESTS
+// ============================================================
+
+#[test]
+fn test_upgrade_regression_pagination_views_remain_aligned_after_project_mutations() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let expected_ids = Vec::from_slice(
+        &env,
+        &[
+            Symbol::new(&env, "rg_page_0"),
+            Symbol::new(&env, "rg_page_1"),
+            Symbol::new(&env, "rg_page_2"),
+            Symbol::new(&env, "rg_page_3"),
+            Symbol::new(&env, "rg_page_4"),
+        ],
+    );
+
+    for (id, title) in [
+        ("rg_page_0", "Page Zero"),
+        ("rg_page_1", "Page One"),
+        ("rg_page_2", "Page Two"),
+        ("rg_page_3", "Page Three"),
+        ("rg_page_4", "Page Four"),
+    ] {
+        client.create_project(
+            &owner,
+            &Symbol::new(&env, id),
+            &String::from_str(&env, title),
+            &String::from_str(&env, "music"),
+            &token,
+            &collabs,
+        );
+    }
+
+    // Mutations should never reshuffle or drop IDs from the pagination index.
+    client.update_project_metadata(
+        &Symbol::new(&env, "rg_page_1"),
+        &owner,
+        &String::from_str(&env, "Page One Renamed"),
+        &String::from_str(&env, "podcast"),
+    );
+    client.lock_project(&Symbol::new(&env, "rg_page_2"), &owner);
+    deposit_to_project(
+        &env,
+        &client,
+        &token,
+        &Symbol::new(&env, "rg_page_3"),
+        &funder,
+        25i128,
+    );
+    client.distribute(&Symbol::new(&env, "rg_page_3"));
+
+    assert_eq!(client.get_project_count(), 5);
+    assert_eq!(client.get_project_ids(&0, &10), expected_ids.clone());
+    assert_eq!(client.get_project_ids(&5, &10), Vec::<Symbol>::new(&env));
+    assert_eq!(client.list_projects(&0, &0).len(), 0);
+
+    for (start, limit, expected_len) in [(0u32, 2u32, 2u32), (1, 3, 3), (3, 5, 2), (4, 1, 1)] {
+        let ids = client.get_project_ids(&start, &limit);
+        let projects = client.list_projects(&start, &limit);
+
+        assert_eq!(ids.len(), expected_len);
+        assert_eq!(projects.len(), expected_len);
+
+        for i in 0..expected_len {
+            assert_eq!(projects.get(i).unwrap().project_id, ids.get(i).unwrap());
+        }
+    }
+
+    let renamed = client
+        .list_projects(&1, &1)
+        .get(0u32)
+        .unwrap();
+    assert_eq!(renamed.project_id, Symbol::new(&env, "rg_page_1"));
+    assert_eq!(renamed.title, String::from_str(&env, "Page One Renamed"));
+
+    let distributed = client
+        .list_projects(&3, &1)
+        .get(0u32)
+        .unwrap();
+    assert_eq!(distributed.project_id, Symbol::new(&env, "rg_page_3"));
+    assert_eq!(distributed.distribution_round, 1);
+    assert_eq!(distributed.total_distributed, 25i128);
+}
+
+#[test]
+fn test_upgrade_regression_metadata_updates_only_mutate_metadata_fields() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[6000u32, 4000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "rg_meta");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Original Metadata"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    deposit_to_project(&env, &client, &token, &project_id, &funder, 100i128);
+    client.distribute(&project_id);
+
+    let before = client.get_project(&project_id).unwrap();
+    let alice_claimed_before = client.get_claimed(&project_id, &alice);
+    let bob_claimed_before = client.get_claimed(&project_id, &bob);
+
+    client.update_project_metadata(
+        &project_id,
+        &owner,
+        &String::from_str(&env, "Updated Metadata"),
+        &String::from_str(&env, "film"),
+    );
+
+    let after = client.get_project(&project_id).unwrap();
+    assert_eq!(after.project_id, before.project_id);
+    assert_eq!(after.owner, before.owner);
+    assert_eq!(after.token, before.token);
+    assert_eq!(after.collaborators.len(), before.collaborators.len());
+    for i in 0..before.collaborators.len() {
+        let before_collab = before.collaborators.get(i).unwrap();
+        let after_collab = after.collaborators.get(i).unwrap();
+        assert_eq!(after_collab.address, before_collab.address);
+        assert_eq!(after_collab.alias, before_collab.alias);
+        assert_eq!(after_collab.basis_points, before_collab.basis_points);
+    }
+    assert_eq!(after.locked, before.locked);
+    assert_eq!(after.total_distributed, before.total_distributed);
+    assert_eq!(after.distribution_round, before.distribution_round);
+    assert_eq!(after.title, String::from_str(&env, "Updated Metadata"));
+    assert_eq!(after.project_type, String::from_str(&env, "film"));
+    assert_eq!(client.get_claimed(&project_id, &alice), alice_claimed_before);
+    assert_eq!(client.get_claimed(&project_id, &bob), bob_claimed_before);
+    assert_eq!(client.get_balance(&project_id), 0);
+
+    client.lock_project(&project_id, &owner);
+    let locked_before_failed_update = client.get_project(&project_id).unwrap();
+    let result = client.try_update_project_metadata(
+        &project_id,
+        &owner,
+        &String::from_str(&env, "Should Not Apply"),
+        &String::from_str(&env, "art"),
+    );
+    assert_eq!(result, Err(Ok(SplitError::ProjectLocked)));
+    assert_eq!(
+        client.get_project(&project_id).unwrap().title,
+        locked_before_failed_update.title
+    );
+    assert_eq!(
+        client.get_project(&project_id).unwrap().project_type,
+        locked_before_failed_update.project_type
+    );
+}
+
+#[test]
+fn test_upgrade_regression_distribution_preserves_rounding_and_accounting_invariants() {
+    let (env, _token_admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone(), carol.clone()]),
+        Vec::from_slice(&env, &[3333u32, 3333u32, 3334u32]),
+    );
+
+    let project_id = Symbol::new(&env, "rg_payout");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Regression Payout"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    // Round 1: last collaborator receives the rounding remainder.
+    deposit_to_project(&env, &client, &token, &project_id, &funder, 101i128);
+    client.distribute(&project_id);
+
+    // Round 2: repeat with a different uneven amount to prove invariants hold
+    // across rounds rather than for a single lucky deposit size.
+    deposit_to_project(&env, &client, &token, &project_id, &funder, 10_003i128);
+    client.distribute(&project_id);
+
+    let token_balance = token::Client::new(&env, &token);
+    assert_eq!(token_balance.balance(&alice), 3_366i128);
+    assert_eq!(token_balance.balance(&bob), 3_366i128);
+    assert_eq!(token_balance.balance(&carol), 3_372i128);
+
+    let alice_info = client.get_claimable(&project_id, &alice);
+    let bob_info = client.get_claimable(&project_id, &bob);
+    let carol_info = client.get_claimable(&project_id, &carol);
+    let project = client.get_project(&project_id).unwrap();
+
+    assert_eq!(alice_info.claimed, 3_366i128);
+    assert_eq!(bob_info.claimed, 3_366i128);
+    assert_eq!(carol_info.claimed, 3_372i128);
+    assert_eq!(alice_info.distribution_round, 2);
+    assert_eq!(bob_info.distribution_round, 2);
+    assert_eq!(carol_info.distribution_round, 2);
+    assert_eq!(project.distribution_round, 2);
+    assert_eq!(project.total_distributed, 10_104i128);
+    assert_eq!(
+        alice_info.claimed + bob_info.claimed + carol_info.claimed,
+        project.total_distributed
+    );
+    assert_eq!(client.get_balance(&project_id), 0);
+}
+
+// ============================================================
 //  project_exists QUERY TESTS
 // ============================================================
 

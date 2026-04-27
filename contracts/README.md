@@ -76,6 +76,10 @@ Transfers `amount` from `from` to contract and credits `ProjectBalance(project_i
 Distributes project balance to collaborators by basis points.
 - Auth: none (permissionless trigger).
 - Errors: `NotFound`, `NoBalance`.
+- Compatibility invariants:
+  - `distribution_round` increases once per successful distribution and never on failure.
+  - `total_distributed` increases by the exact amount paid out.
+  - Any rounding remainder is assigned to the final collaborator so the full project balance is consumed.
 
 ### `withdraw_unallocated(admin, token, to, amount) -> Result<(), SplitError>`
 Admin-only recovery of tokens held by contract but not tracked in any project ledger.
@@ -113,9 +117,16 @@ Returns total number of created projects.
 
 ### `list_projects(start, limit) -> Vec<SplitProject>`
 Paginated projects.
+- Compatibility invariants:
+  - Creation order is stable.
+  - Windowing semantics stay aligned with `get_project_ids(start, limit)`.
+  - Metadata edits, locking, deposits, and distributions do not reorder or remove entries.
 
 ### `get_project_ids(start, limit) -> Vec<Symbol>`
 Paginated project IDs in creation order.
+- Compatibility invariants:
+  - This is the canonical creation-order index app layers can page over.
+  - Returned IDs must line up position-for-position with `list_projects(start, limit)`.
 
 ### `is_token_allowed(token) -> bool`
 Returns allowlist status.
@@ -125,6 +136,14 @@ Returns count of allowlisted token addresses.
 
 ### `get_admin() -> Option<Address>`
 Returns current admin.
+
+## Regression Guarantees
+
+The contract test suite includes upgrade-safety regression coverage for the app-facing assumptions most likely to break compatibility:
+
+- Pagination semantics: `list_projects` and `get_project_ids` stay aligned by index and preserve creation order across later project mutations.
+- Metadata mutability: only `title` and `project_type` may change while unlocked; ownership, collaborators, token, lock state, and payout history remain untouched.
+- Payout accounting: collaborator payouts, claimed ledgers, `distribution_round`, `total_distributed`, and rounding-remainder handling stay internally consistent across repeated rounds.
 
 ## Events
 
