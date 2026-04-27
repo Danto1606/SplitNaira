@@ -1,0 +1,31 @@
+import { z } from "zod";
+
+// Stellar address validator
+export const stellarAddressSchema = z
+  .string()
+  .min(1, "wallet address is required")
+  .regex(/^G[A-Z2-7]{55}$/, {
+    message: "Must be a valid Stellar account ID (G…)",
+  });
+
+// User registration schema
+export const userRegistrationSchema = z.object({
+  walletAddress: stellarAddressSchema,
+  email: z.string().email("Invalid email format").optional(),
+  alias: z.string().min(1, "Alias is required").max(64, "Alias must be at most 64 characters").optional(),
+});
+
+// User response schema
+export const userResponseSchema = z.object({
+  id: z.string().uuid(),
+  walletAddress: z.string(),
+  email: z.string().optional(),
+  alias: z.string().optional(),
+  role: z.string(),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type UserRegistration = z.infer<typeof userRegistrationSchema>;
+export type UserResponse = z.infer<typeof userResponseSchema>;
