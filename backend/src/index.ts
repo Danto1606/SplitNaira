@@ -44,6 +44,13 @@ app.use(
   })
 );
 
+SplitNaira is in active development. This repo currently contains:
+
+- `contracts/` Soroban smart contract and tests
+- `frontend/` Next.js + Tailwind scaffold
+- `backend/` Express API scaffold
+- `demo/` Static HTML flow prototype
+
 app.use("/health", readLimiter);
 app.use("/splits/admin", adminLimiter);
 app.use("/splits", (req, res, next) => {

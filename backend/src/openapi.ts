@@ -28,6 +28,13 @@ const registry = new OpenAPIRegistry();
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
+// SplitNaira is in active development. This repo currently contains:
+
+// - `contracts/` Soroban smart contract and tests
+// - `frontend/` Next.js + Tailwind scaffold
+// - `backend/` Express API scaffold
+// - `demo/` Static HTML flow prototype
+
 const ProjectSchema = registry.register(
   "Project",
   z.object({
