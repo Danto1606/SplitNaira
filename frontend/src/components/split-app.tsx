@@ -1235,23 +1235,33 @@ export function SplitApp() {
           <div className="space-y-10 animate-in fade-in duration-700">
             {/* Summary Cards */}
             <div className="grid gap-6 md:grid-cols-3">
-              <div className="glass-card rounded-3xl p-8 border-l-4 border-greenBright">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted mb-2">Total Managed</p>
-                <p className="text-3xl font-display">{dashboardData.length} <span className="text-sm font-sans text-muted">Projects</span></p>
-              </div>
-              <div className="glass-card rounded-3xl p-8 border-l-4 border-goldLight">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted mb-2">Platform Treasury</p>
-                <p className="text-3xl font-display text-greenBright">
-                  {dashboardData.reduce((sum, p) => sum + Number(p.balance), 0).toLocaleString()}
-                  <span className="text-sm font-sans text-muted ml-2">Stroops</span>
-                </p>
-              </div>
-              <div className="glass-card rounded-3xl p-8 border-l-4 border-white/20">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted mb-2">Lifetime Payouts</p>
-                <p className="text-3xl font-display">
-                  {dashboardData.reduce((sum, p) => sum + Number(p.totalDistributed), 0).toLocaleString()}
-                </p>
-              </div>
+              {isLoadingDashboard ? (
+                <>
+                  <SummaryCardSkeleton />
+                  <SummaryCardSkeleton />
+                  <SummaryCardSkeleton />
+                </>
+              ) : (
+                <>
+                  <div className="glass-card rounded-3xl p-8 border-l-4 border-greenBright">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted mb-2">Total Managed</p>
+                    <p className="text-3xl font-display">{dashboardData.length} <span className="text-sm font-sans text-muted">Projects</span></p>
+                  </div>
+                  <div className="glass-card rounded-3xl p-8 border-l-4 border-goldLight">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted mb-2">Platform Treasury</p>
+                    <p className="text-3xl font-display text-greenBright">
+                      {dashboardData.reduce((sum, p) => sum + Number(p.balance), 0).toLocaleString()}
+                      <span className="text-sm font-sans text-muted ml-2">Stroops</span>
+                    </p>
+                  </div>
+                  <div className="glass-card rounded-3xl p-8 border-l-4 border-white/20">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted mb-2">Lifetime Payouts</p>
+                    <p className="text-3xl font-display">
+                      {dashboardData.reduce((sum, p) => sum + Number(p.totalDistributed), 0).toLocaleString()}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
 
             {wallet.connected && isContractAdmin && tokenAllowlist && (

@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
+import swaggerUi from "swagger-ui-express";
 import { healthRouter } from "./routes/health.js";
 import { splitsRouter } from "./routes/splits.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
@@ -11,6 +12,7 @@ import { readLimiter, writeLimiter, adminLimiter } from "./middleware/rate-limit
 import { validateEnv, printEnvDiagnostics } from "./config/env.js";
 import { initDatabase, closeDatabase } from "./services/database.js";
 import { logger } from "./services/logger.js";
+import { generateOpenApi } from "./openapi.js";
 
 dotenv.config();
 
@@ -61,6 +63,33 @@ app.get("/", (_req, res) => {
 
 app.use("/health", healthRouter);
 app.use("/splits", splitsRouter);
+
+// ─── OpenAPI & Swagger Documentation ──────────────────────────────────────────
+
+// Serve OpenAPI spec as JSON
+app.get("/api/openapi.json", (_req, res) => {
+  const spec = generateOpenApi();
+  res.json(spec);
+});
+
+// Serve Swagger UI at /api/docs
+const swaggerOptions = {
+  customCss: ".swagger-ui .topbar { display: none }",
+  customSiteTitle: "SplitNaira API Documentation",
+  swaggerOptions: {
+    url: "/api/openapi.json",
+    displayOperationId: true,
+    filter: true,
+    showExtensions: true,
+  },
+};
+
+app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(null, swaggerOptions));
+
+// Redirect /api/docs/ to /api/docs
+app.get("/api/docs/", (_req, res) => {
+  res.redirect("/api/docs");
+});
 
 app.use(notFoundHandler);
 app.use(errorHandler);
