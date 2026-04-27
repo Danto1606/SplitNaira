@@ -5,6 +5,8 @@ import morgan from "morgan";
 import dotenv from "dotenv";
 import { healthRouter } from "./routes/health.js";
 import { splitsRouter } from "./routes/splits.js";
+import { usersRouter } from "./routes/users.js";
+import { transactionsRouter } from "./routes/transactions.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
 import { readLimiter, writeLimiter, adminLimiter } from "./middleware/rate-limit.js";
@@ -50,6 +52,11 @@ app.use("/splits", (req, res, next) => {
   if (req.method === "GET") return readLimiter(req, res, next);
   return writeLimiter(req, res, next);
 });
+app.use("/users", (req, res, next) => {
+  if (req.method === "GET") return readLimiter(req, res, next);
+  return writeLimiter(req, res, next);
+});
+app.use("/transactions", readLimiter);
 
 app.get("/", (_req, res) => {
   res.json({
@@ -61,6 +68,8 @@ app.get("/", (_req, res) => {
 
 app.use("/health", healthRouter);
 app.use("/splits", splitsRouter);
+app.use("/users", usersRouter);
+app.use("/transactions", transactionsRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
