@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction, Router } from "express";
 import { z } from "zod";
+import { CollaboratorSchema } from "../generated/contract-types.js";
 import {
   Address,
   BASE_FEE,
@@ -60,9 +61,8 @@ export const stellarAddressSchema = z
     }
   });
 
-export const collaboratorSchema = z.object({
+export const collaboratorSchema = CollaboratorSchema.extend({
   address: stellarAddressSchema,
-  alias: z.string().min(1, "alias is required").max(64),
   basisPoints: z
     .number()
     .int("basisPoints must be an integer")

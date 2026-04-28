@@ -1,4 +1,5 @@
 import type { SplitProject } from "./stellar";
+import type { Collaborator } from "../generated/contract-types.js";
 import { getEnv } from "./env";
 
 const API_BASE_URL = getEnv().NEXT_PUBLIC_API_BASE_URL;
@@ -8,11 +9,7 @@ export interface CreateSplitPayload {
   title: string;
   projectType: string;
   token: string;
-  collaborators: Array<{
-    address: string;
-    alias: string;
-    basisPoints: number;
-  }>;
+  collaborators: Array<Collaborator>;
 }
 export interface ProjectHistoryItem {
   id: string;
@@ -310,7 +307,7 @@ export async function buildUpdateMetadataXdr(
 export async function buildUpdateCollaboratorsXdr(
   projectId: string,
   owner: string,
-  collaborators: Array<{ address: string; alias: string; basisPoints: number }>
+  collaborators: Array<Collaborator>
 ): Promise<BuildSplitResponse> {
   return requestJson<BuildSplitResponse>(
     `/splits/${encodeURIComponent(projectId)}/collaborators`,
