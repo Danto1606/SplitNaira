@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 
 import { healthRouter } from "./routes/health.js";
 import { splitsRouter } from "./routes/splits.js";
+import { docsRouter } from "./routes/docs.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
 
@@ -41,6 +42,15 @@ app.use(helmet());
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: "1mb" }));
 app.use(requestIdMiddleware);
+
+// Swagger UI needs inline scripts/styles — relax CSP only for /docs
+app.use("/docs", (_req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+  );
+  next();
+});
 app.use(
   morgan((tokens, req, res) => {
     const requestId = res.locals.requestId ?? req.header("x-request-id") ?? "-";
@@ -69,6 +79,7 @@ app.get("/", (_req, res) => {
 
 app.use("/health", healthRouter);
 app.use("/splits", splitsRouter);
+app.use("/docs", docsRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
