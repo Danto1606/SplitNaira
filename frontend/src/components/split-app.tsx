@@ -23,6 +23,10 @@ import {
   getUnallocatedBalance,
   buildWithdrawUnallocatedXdr,
   type UnallocatedBalanceState,
+  getAdminStatus,
+  buildPauseDistributionsXdr,
+  buildUnpauseDistributionsXdr,
+  type AdminStatusState,
 } from "@/lib/api";
 import { isOwner } from "@/lib/address";
 import {
@@ -219,6 +223,14 @@ export function SplitApp() {
   const [isSubmittingRecovery, setIsSubmittingRecovery] = useState(false);
   const [lastRecoveryTxHash, setLastRecoveryTxHash] = useState<string | null>(null);
 
+  // Issue #165: Distribution pause/unpause control plane state
+  const [adminStatus, setAdminStatus] = useState<AdminStatusState | null>(null);
+  const [isLoadingAdminStatus, setIsLoadingAdminStatus] = useState(false);
+  const [showPauseConfirm, setShowPauseConfirm] = useState(false);
+  const [showUnpauseConfirm, setShowUnpauseConfirm] = useState(false);
+  const [isSubmittingPause, setIsSubmittingPause] = useState(false);
+  const [lastPauseTxHash, setLastPauseTxHash] = useState<string | null>(null);
+
   const totalBasisPoints = useMemo(
     () =>
       collaborators.reduce((sum, collaborator) => {
@@ -373,6 +385,21 @@ export function SplitApp() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAdminStatus()
+      .then((status) => {
+        if (!cancelled) setAdminStatus(status);
+      })
+      .catch((error) => {
+        console.error("Failed to fetch admin status:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingAdminStatus(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   async function onConnectWallet() {
@@ -1045,6 +1072,59 @@ export function SplitApp() {
     }
   };
 
+  const refreshAdminStatus = async () => {
+    setIsLoadingAdminStatus(true);
+    try {
+      const status = await getAdminStatus();
+      setAdminStatus(status);
+      return status;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh admin status.";
+      notify.error(message);
+      return null;
+    } finally {
+      setIsLoadingAdminStatus(false);
+    }
+  };
+
+  const onTogglePause = async (action: "pause" | "unpause") => {
+    if (!wallet.address || !isContractAdmin) {
+      notify.error("Only the contract admin can pause or unpause distributions.");
+      return;
+    }
+    setIsSubmittingPause(true);
+    setLastPauseTxHash(null);
+    try {
+      const buildResponse = action === "pause"
+        ? await buildPauseDistributionsXdr(wallet.address)
+        : await buildUnpauseDistributionsXdr(wallet.address);
+
+      const signedTxXdr = await signWithFreighter(
+        buildResponse.xdr,
+        buildResponse.metadata.networkPassphrase
+      );
+      const server = new rpc.Server(
+        process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org",
+        { allowHttp: true }
+      );
+      const transaction = new Transaction(signedTxXdr, buildResponse.metadata.networkPassphrase);
+      const submitResponse = await server.sendTransaction(transaction);
+      if (submitResponse.status === "ERROR") {
+        throw new Error(submitResponse.errorResult?.toString() ?? "Transaction failed.");
+      }
+      setLastPauseTxHash(submitResponse.hash ?? null);
+      setShowPauseConfirm(false);
+      setShowUnpauseConfirm(false);
+      notify.success(action === "pause" ? "Distributions paused." : "Distributions resumed.");
+      await refreshAdminStatus();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Transaction failed.";
+      notify.error(message);
+    } finally {
+      setIsSubmittingPause(false);
+    }
+  };
+
   const onSubmitAllowlistAction = async (action: "allow" | "disallow") => {
     if (!wallet.address || !isContractAdmin) {
       notify.error("Only the configured contract admin can manage the allowlist.");
@@ -1593,6 +1673,88 @@ export function SplitApp() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Issue #165: Distribution Pause Control Plane */}
+            {wallet.connected && isContractAdmin && (
+              <div className="glass-card rounded-[2.5rem] p-8 md:p-10 border border-red-500/10">
+                <div className="flex flex-wrap items-start justify-between gap-6 mb-8">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-red-400/80">
+                      Admin — Emergency Controls
+                    </p>
+                    <h2 className="font-display text-2xl tracking-tight">Distribution Pause Control</h2>
+                    <p className="max-w-2xl text-sm text-muted">
+                      Pause or resume all distributions across every project. This is a global emergency stop — use with care.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { void refreshAdminStatus(); }}
+                    disabled={isLoadingAdminStatus}
+                    className="premium-button rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-muted hover:text-ink disabled:opacity-40"
+                  >
+                    {isLoadingAdminStatus ? "Refreshing..." : "Refresh State"}
+                  </button>
+                </div>
+
+                <div className="rounded-3xl border p-6 mb-6 flex items-center justify-between gap-4"
+                  style={{ borderColor: adminStatus?.isPaused ? "rgba(251,191,36,0.3)" : "rgba(255,255,255,0.05)" }}
+                >
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted">Current State</p>
+                    {adminStatus ? (
+                      <p className={`text-2xl font-display ${adminStatus.isPaused ? "text-amber-400" : "text-greenBright"}`}>
+                        {adminStatus.isPaused ? "⏸ Paused" : "▶ Active"}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted italic">Loading…</p>
+                    )}
+                    <p className="text-xs text-muted">
+                      {adminStatus?.isPaused
+                        ? "All distribution calls will be rejected by the contract."
+                        : "Distributions are running normally."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  {!adminStatus?.isPaused ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowPauseConfirm(true)}
+                      disabled={isSubmittingPause || isLoadingAdminStatus}
+                      className="premium-button rounded-2xl border border-amber-400/30 bg-amber-400/10 px-6 py-4 text-[10px] font-black uppercase tracking-[0.3em] text-amber-300 disabled:opacity-30"
+                    >
+                      Pause Distributions
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowUnpauseConfirm(true)}
+                      disabled={isSubmittingPause || isLoadingAdminStatus}
+                      className="premium-button rounded-2xl bg-greenBright px-6 py-4 text-[10px] font-black uppercase tracking-[0.3em] text-[#0a0a09] disabled:opacity-30"
+                    >
+                      Resume Distributions
+                    </button>
+                  )}
+                </div>
+
+                {lastPauseTxHash && (
+                  <div className="mt-6 rounded-2xl border border-greenBright/20 bg-greenBright/5 p-5">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-greenBright mb-2">Transaction Submitted</p>
+                    <p className="font-mono text-[11px] text-muted break-all">Tx: {lastPauseTxHash}</p>
+                    <a
+                      href={`https://stellar.expert/explorer/testnet/tx/${lastPauseTxHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-block text-[10px] font-bold text-greenBright underline underline-offset-4 hover:text-white"
+                    >
+                      View on Explorer →
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2485,12 +2647,19 @@ export function SplitApp() {
                     <button
                       onClick={() => setShowDistributeModal(true)}
                       disabled={
-                        Number(fetchedProject.balance) <= 0 || !wallet.connected
+                        Number(fetchedProject.balance) <= 0 || !wallet.connected || adminStatus?.isPaused === true
                       }
                       className="premium-button w-full rounded-2xl bg-greenBright py-6 text-xs font-black uppercase tracking-[0.3em] text-[#0a0a09] shadow-xl shadow-greenBright/10 disabled:opacity-10 disabled:bg-white"
                     >
                       Trigger Distribution
                     </button>
+                    {adminStatus?.isPaused && (
+                      <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-center">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-amber-300">
+                          ⚠ Distributions are paused by the contract admin
+                        </p>
+                      </div>
+                    )}
                     {!wallet.connected && (
                       <p className="text-center text-[10px] font-bold text-red-500 uppercase tracking-widest">
                         Connect wallet to distribute
@@ -2752,11 +2921,18 @@ export function SplitApp() {
 
                       <button
                         onClick={() => setShowDistributeModal(true)}
-                        disabled={Number(fetchedProject.balance) <= 0 || !wallet.connected}
+                        disabled={Number(fetchedProject.balance) <= 0 || !wallet.connected || adminStatus?.isPaused === true}
                         className="premium-button w-full rounded-2xl bg-greenBright py-6 text-xs font-black uppercase tracking-[0.3em] text-[#0a0a09] shadow-xl shadow-greenBright/10 disabled:opacity-10 disabled:bg-white"
                       >
                         Trigger Distribution
                       </button>
+                      {adminStatus?.isPaused && (
+                        <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-center">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-300">
+                            ⚠ Distributions are paused by the contract admin
+                          </p>
+                        </div>
+                      )}
                       {!wallet.connected && <p className="text-center text-[10px] font-bold text-red-500 uppercase tracking-widest">Connect wallet to distribute</p>}
                       {Number(fetchedProject.balance) <= 0 && <p className="text-center text-[10px] font-bold text-muted uppercase tracking-widest">No funds available to distribute</p>}
 
@@ -3018,6 +3194,72 @@ export function SplitApp() {
                   setDepositAmount("");
                 }}
                 disabled={isDepositing}
+                className="premium-button w-full rounded-2xl border border-white/10 py-5 text-xs font-bold uppercase tracking-[0.2em] text-muted hover:bg-white/5 hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pause confirmation modal */}
+      {showPauseConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0a09]/80 p-6 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="glass-card w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 duration-300">
+            <h2 className="font-display text-3xl text-amber-400">Pause distributions?</h2>
+            <p className="mt-4 text-sm text-muted leading-relaxed">
+              This will immediately block all distribution calls across every project until you explicitly resume. No funds will be lost — only payouts are halted.
+            </p>
+            <p className="mt-3 text-[10px] font-bold uppercase tracking-widest text-amber-300">
+              This action requires your admin wallet signature.
+            </p>
+            <div className="mt-8 flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => { void onTogglePause("pause"); }}
+                disabled={isSubmittingPause}
+                className="premium-button w-full rounded-2xl border border-amber-400/30 bg-amber-400/10 py-5 text-xs font-black uppercase tracking-[0.3em] text-amber-300 disabled:opacity-40"
+              >
+                {isSubmittingPause ? "Signing & submitting..." : "Confirm Pause"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPauseConfirm(false)}
+                disabled={isSubmittingPause}
+                className="premium-button w-full rounded-2xl border border-white/10 py-5 text-xs font-bold uppercase tracking-[0.2em] text-muted hover:bg-white/5 hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unpause confirmation modal */}
+      {showUnpauseConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0a09]/80 p-6 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="glass-card w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 duration-300">
+            <h2 className="font-display text-3xl text-greenBright">Resume distributions?</h2>
+            <p className="mt-4 text-sm text-muted leading-relaxed">
+              This will re-enable distribution calls for all projects. Confirm that the emergency condition has been resolved before proceeding.
+            </p>
+            <p className="mt-3 text-[10px] font-bold uppercase tracking-widest text-greenBright/70">
+              This action requires your admin wallet signature.
+            </p>
+            <div className="mt-8 flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => { void onTogglePause("unpause"); }}
+                disabled={isSubmittingPause}
+                className="premium-button w-full rounded-2xl bg-greenBright py-5 text-xs font-black uppercase tracking-[0.3em] text-[#0a0a09] disabled:opacity-40"
+              >
+                {isSubmittingPause ? "Signing & submitting..." : "Confirm Resume"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowUnpauseConfirm(false)}
+                disabled={isSubmittingPause}
                 className="premium-button w-full rounded-2xl border border-white/10 py-5 text-xs font-bold uppercase tracking-[0.2em] text-muted hover:bg-white/5 hover:text-ink"
               >
                 Cancel

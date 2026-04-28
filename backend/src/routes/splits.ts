@@ -1667,32 +1667,7 @@ splitsRouter.post("/admin/pause-distributions", async (req: Request, res: Respon
         requestId
       });
     }
-    
-    let preparedTx;
-    try {
-      const contract = new Contract(config.contractId);
-      const tx = new TransactionBuilder(sourceAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: config.networkPassphrase
-      })
-        .addOperation(
-          contract.call("distribute", nativeToScVal(projectId, { type: "symbol" }))
-        )
-        .setTimeout(300)
-        .build();
 
-      preparedTx = await server.prepareTransaction(tx);
-    } catch (error) {
-      throw translateSorobanError(error);
-    }
-
-    return res.status(200).json({
-      xdr: preparedTx.toXDR(),
-      metadata: {
-        contractId: config.contractId,
-        networkPassphrase: config.networkPassphrase,
-        sourceAccount: sourceAddress,
-        operation: "distribute"
     try {
       const result = await buildPauseDistributionsUnsignedXdr(parsed.data);
       return res.status(200).json(result);
@@ -1714,25 +1689,6 @@ splitsRouter.post("/admin/pause-distributions", async (req: Request, res: Respon
 splitsRouter.post("/admin/unpause-distributions", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
-    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
-    if (!parsedId.success) {
-      throw new AppError(
-        ErrorType.VALIDATION,
-        ErrorCode.VALIDATION_ERROR,
-        "Invalid projectId format.",
-        undefined,
-        parsedId.error.flatten()
-      );
-    }
-    const projectId = parsedId.data;
-    const { address } = req.params;
-
-    if (!address) {
-      throw new AppError(
-        ErrorType.VALIDATION, 
-        ErrorCode.VALIDATION_ERROR, 
-        "address is required"
-      );
     const parsed = pauseDistributionsSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -1744,47 +1700,6 @@ splitsRouter.post("/admin/unpause-distributions", async (req: Request, res: Resp
     }
 
     try {
-      sourceAccount = await server.getAccount(config.simulatorAccount);
-    } catch {
-      throw new AppError(
-        ErrorType.ACCOUNT_STATE,
-        ErrorCode.ACCOUNT_NOT_FOUND,
-        "Simulator account not found",
-        { message: "The backend simulator account is not configured correctly." }
-      );
-    }
-
-    let simulated;
-    try {
-      const contract = new Contract(config.contractId);
-      const tx = new TransactionBuilder(sourceAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: config.networkPassphrase
-      })
-        .addOperation(
-          contract.call(
-            "get_claimable",
-            nativeToScVal(projectId, { type: "symbol" }),
-            Address.fromString(address).toScVal()
-          )
-        )
-        .setTimeout(300)
-        .build();
-
-      simulated = await server.simulateTransaction(tx);
-    } catch (error) {
-      throw translateSorobanError(error);
-    }
-    const retval = "result" in simulated ? simulated.result?.retval : undefined;
-    if (!retval) {
-      throw new AppError(
-        ErrorType.RPC,
-        ErrorCode.NOT_FOUND,
-        "Claimable info not found"
-      );
-    }
-
-    return res.status(200).json(serializeBigInts(scValToNative(retval)));
       const result = await buildUnpauseDistributionsUnsignedXdr(parsed.data);
       return res.status(200).json(result);
     } catch (error) {

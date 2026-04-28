@@ -381,6 +381,30 @@ export async function getAdminStatus(): Promise<AdminStatusState> {
   );
 }
 
+export async function buildPauseDistributionsXdr(admin: string): Promise<BuildSplitResponse> {
+  return requestJson<BuildSplitResponse>(
+    "/splits/admin/pause-distributions",
+    "Failed to build pause transaction",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin })
+    }
+  );
+}
+
+export async function buildUnpauseDistributionsXdr(admin: string): Promise<BuildSplitResponse> {
+  return requestJson<BuildSplitResponse>(
+    "/splits/admin/unpause-distributions",
+    "Failed to build unpause transaction",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin })
+    }
+  );
+}
+
 export async function isTokenAllowed(token: string): Promise<{ token: string; isAllowed: boolean }> {
   return requestJson<{ token: string; isAllowed: boolean }>(
     `/splits/admin/is-token-allowed?token=${encodeURIComponent(token)}`,
