@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { rpc, Transaction, StrKey } from "@stellar/stellar-sdk";
 import { clsx } from "clsx";
+import { Controller, useFieldArray, useForm, type SubmitHandler } from "react-hook-form";
 
 import {
   buildAllowTokenXdr,
@@ -31,6 +32,7 @@ import {
 import { type SplitProject, getExplorerUrl, getExplorerLabel } from "@/lib/stellar";
 import { useWallet } from "@/hooks/useWallet";
 import { notify } from "@/lib/notification";
+import { SummaryCardSkeleton } from "./Skeleton";
 import { TokenSelector } from "./TypeSelector";
 import { TransactionReceiptView, type TransactionReceipt } from "./TransactionReceiptView";
 
@@ -41,6 +43,20 @@ interface CollaboratorInput {
   basisPoints: string;
 }
 
+interface CreateCollaboratorInput {
+  address: string;
+  alias: string;
+  basisPoints: string;
+}
+
+interface CreateSplitFormValues {
+  projectId: string;
+  title: string;
+  projectType: string;
+  token: string;
+  collaborators: CreateCollaboratorInput[];
+}
+
 interface AllowlistActionResult {
   action: "allow" | "disallow";
   token: string;
@@ -48,10 +64,18 @@ interface AllowlistActionResult {
 }
 
 // Use static IDs instead of random UUIDs to avoid hydration mismatches
-const getInitialCollaborators = (): CollaboratorInput[] => [
-  { id: "collab-1", address: "", alias: "", basisPoints: "5000" },
-  { id: "collab-2", address: "", alias: "", basisPoints: "5000" },
+const getInitialCreateCollaborators = (): CreateCollaboratorInput[] => [
+  { address: "", alias: "", basisPoints: "5000" },
+  { address: "", alias: "", basisPoints: "5000" },
 ];
+
+const getInitialCreateFormValues = (): CreateSplitFormValues => ({
+  projectId: "",
+  title: "",
+  projectType: "music",
+  token: "",
+  collaborators: getInitialCreateCollaborators(),
+});
 
 // Seeded project IDs for Phase 3 Projects list view
 const SEEDED_PROJECT_IDS = [
@@ -65,17 +89,33 @@ const SEEDED_PROJECT_IDS = [
 export function SplitApp() {
   const { wallet, connect, refresh } = useWallet();
 
-  const [projectId, setProjectId] = useState("");
-  const [title, setTitle] = useState("");
-  const [projectType, setProjectType] = useState("music");
-  const [token, setToken] = useState("");
-  const [collaborators, setCollaborators] = useState<CollaboratorInput[]>(getInitialCollaborators());
+  const {
+    control,
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors: createFormErrors, isValid: isCreateFormValid },
+  } = useForm<CreateSplitFormValues>({
+    defaultValues: getInitialCreateFormValues(),
+    mode: "onChange",
+  });
+  const {
+    fields: collaboratorFields,
+    append: appendCollaborator,
+    remove: removeCollaborator,
+  } = useFieldArray({
+    control,
+    name: "collaborators",
+  });
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<TransactionReceipt | null>(null);
   const [createdProject, setCreatedProject] = useState<SplitProject | null>(
     null,
   );
+  const latestTxHash = txHash ?? receipt?.hash ?? null;
 
   const [activeTab, setActiveTab] = useState<"dashboard" | "create" | "manage" | "projects">("dashboard");
   const [createStep, setCreateStep] = useState(1); // 1: Project, 2: Collaborators, 3: Review, 4: Submit
@@ -219,54 +259,68 @@ export function SplitApp() {
   const [isSubmittingRecovery, setIsSubmittingRecovery] = useState(false);
   const [lastRecoveryTxHash, setLastRecoveryTxHash] = useState<string | null>(null);
 
+  const watchedCollaborators = watch("collaborators");
+  const createProjectId = watch("projectId");
+  const createTitle = watch("title");
+  const createProjectType = watch("projectType");
+  const createToken = watch("token");
+
   const totalBasisPoints = useMemo(
     () =>
-      collaborators.reduce((sum, collaborator) => {
+      watchedCollaborators.reduce((sum, collaborator) => {
         const parsed = Number.parseInt(collaborator.basisPoints, 10);
         return sum + (Number.isFinite(parsed) ? parsed : 0);
       }, 0),
-    [collaborators],
+    [watchedCollaborators],
   );
 
-  const validationErrors = useMemo(() => {
+  const collaboratorValidationErrors = useMemo(() => {
     const errors: Record<string, string> = {};
     const addresses = new Map<string, string>();
     const duplicates = new Set<string>();
 
-    collaborators.forEach((c) => {
-      const addr = c.address.trim();
+    collaboratorFields.forEach((field, index) => {
+      const collaborator = watchedCollaborators[index];
+      if (!collaborator) {
+        return;
+      }
+
+      const addr = collaborator.address.trim();
       if (addr) {
-        if (
-          !StrKey.isValidEd25519PublicKey(addr) &&
-          !StrKey.isValidContract(addr)
-        ) {
-          errors[c.id] = "Invalid Stellar address (G...) or contract ID (C...)";
+        if (!StrKey.isValidEd25519PublicKey(addr) && !StrKey.isValidContract(addr)) {
+          errors[field.id] = "Invalid Stellar address (G...) or contract ID (C...)";
+        } else if (addresses.has(addr)) {
+          duplicates.add(addr);
         } else {
-          if (addresses.has(addr)) {
-            duplicates.add(addr);
-          } else {
-            addresses.set(addr, c.id);
-          }
+          addresses.set(addr, field.id);
         }
       }
     });
 
     if (duplicates.size > 0) {
-      collaborators.forEach((c) => {
-        const addr = c.address.trim();
-        if (duplicates.has(addr)) {
-          errors[c.id] = "Duplicate address";
+      collaboratorFields.forEach((field, index) => {
+        const addr = watchedCollaborators[index]?.address.trim();
+        if (addr && duplicates.has(addr)) {
+          errors[field.id] = "Duplicate address";
         }
       });
     }
 
     return errors;
-  }, [collaborators]);
+  }, [collaboratorFields, watchedCollaborators]);
 
   const isValid = useMemo(
     () =>
-      totalBasisPoints === 10_000 && Object.keys(validationErrors).length === 0,
-    [totalBasisPoints, validationErrors],
+      isCreateFormValid &&
+      totalBasisPoints === 10_000 &&
+      Object.keys(collaboratorValidationErrors).length === 0 &&
+      collaboratorFields.length >= 2,
+    [
+      collaboratorValidationErrors,
+      collaboratorFields.length,
+      isCreateFormValid,
+      totalBasisPoints,
+    ],
   );
 
   const editCollaboratorsValidationErrors = useMemo(() => {
@@ -324,17 +378,17 @@ export function SplitApp() {
   // Step validation
   const isStep1Valid = useMemo(
     () =>
-      projectId.trim() &&
-      title.trim() &&
-      token.trim() &&
-      projectType.trim() &&
-      (StrKey.isValidEd25519PublicKey(token) || StrKey.isValidContract(token)),
-    [projectId, title, token, projectType]
+      Boolean(createProjectId.trim()) &&
+      Boolean(createTitle.trim()) &&
+      Boolean(createProjectType.trim()) &&
+      Boolean(createToken.trim()) &&
+      (StrKey.isValidEd25519PublicKey(createToken) || StrKey.isValidContract(createToken)),
+    [createProjectId, createProjectType, createTitle, createToken],
   );
 
   const isStep2Valid = useMemo(
-    () => totalBasisPoints === 10_000 && Object.keys(validationErrors).length === 0 && collaborators.length >= 2,
-    [totalBasisPoints, validationErrors, collaborators.length]
+    () => totalBasisPoints === 10_000 && Object.keys(collaboratorValidationErrors).length === 0 && collaboratorFields.length >= 2,
+    [collaboratorFields.length, collaboratorValidationErrors, totalBasisPoints],
   );
 
   const normalizedAllowlistToken = allowlistTokenInput.trim();
@@ -536,35 +590,10 @@ export function SplitApp() {
 
   function _onWizardReset() {
     setCreateStep(1);
-    setProjectId("");
-    setTitle("");
-    setProjectType("music");
-    setToken("");
-    setCollaborators(getInitialCollaborators());
+    reset(getInitialCreateFormValues());
     setTxHash(null);
     setReceipt(null);
     setCreatedProject(null);
-  }
-
-  function updateCollaborator(id: string, patch: Partial<CollaboratorInput>) {
-    setCollaborators((prev) =>
-      prev.map((collaborator) =>
-        collaborator.id === id ? { ...collaborator, ...patch } : collaborator,
-      ),
-    );
-  }
-
-  function addCollaborator() {
-    setCollaborators((prev) => [
-      ...prev,
-      { id: `collab-${Date.now()}-${prev.length}`, address: "", alias: "", basisPoints: "0" },
-    ]);
-  }
-
-  function removeCollaborator(id: string) {
-    setCollaborators((prev) =>
-      prev.length <= 2 ? prev : prev.filter((c) => c.id !== id),
-    );
   }
 
   function updateEditCollaborator(id: string, patch: Partial<CollaboratorInput>) {
@@ -586,8 +615,7 @@ export function SplitApp() {
     );
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const onSubmit: SubmitHandler<CreateSplitFormValues> = async (data) => {
     if (!wallet.connected || !wallet.address) {
       notify.error("Connect Freighter wallet first.");
       return;
@@ -596,7 +624,7 @@ export function SplitApp() {
       notify.error("Please fix the validation errors.");
       return;
     }
-    const collaboratorPayload = collaborators.map((collaborator) => ({
+    const collaboratorPayload = data.collaborators.map((collaborator) => ({
       address: collaborator.address.trim(),
       alias: collaborator.alias.trim(),
       basisPoints: Number.parseInt(collaborator.basisPoints, 10),
@@ -607,10 +635,10 @@ export function SplitApp() {
     try {
       const buildResponse = await buildCreateSplitXdr({
         owner: wallet.address,
-        projectId: projectId.trim(),
-        title: title.trim(),
-        projectType: projectType.trim(),
-        token: token.trim(),
+        projectId: data.projectId.trim(),
+        title: data.title.trim(),
+        projectType: data.projectType.trim(),
+        token: data.token.trim(),
         collaborators: collaboratorPayload,
       });
       const signedTxXdr = await signWithFreighter(
@@ -638,15 +666,15 @@ export function SplitApp() {
         setReceipt({
           hash: submitResponse.hash,
           action: "create",
-          projectId: projectId.trim(),
-          title: title.trim(),
+          projectId: data.projectId.trim(),
+          title: data.title.trim(),
         });
       }
       notify.success("Split project created successfully.");
 
       // Fetch and store the created project details
       try {
-        const projectDetails = await getSplit(projectId.trim());
+        const projectDetails = await getSplit(data.projectId.trim());
         setCreatedProject(projectDetails);
         // Advance to success step
         setCreateStep(4);
@@ -663,7 +691,7 @@ export function SplitApp() {
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
 
   async function fetchHistory(id: string, cursor?: string) {
     setIsLoadingHistory(true);
@@ -998,7 +1026,7 @@ export function SplitApp() {
     }
   }, [projectsList.length]);
 
-  const onFetchDashboardData = async () => {
+  const onFetchDashboardData = useCallback(async () => {
     setIsLoadingDashboard(true);
     try {
       const projects = await getAllSplits();
@@ -1027,7 +1055,7 @@ export function SplitApp() {
     } finally {
       setIsLoadingDashboard(false);
     }
-  };
+  }, [wallet.address, wallet.connected]);
 
   const refreshTokenAllowlist = async () => {
     setIsLoadingAllowlist(true);
@@ -1464,7 +1492,7 @@ export function SplitApp() {
                 {/* Step 1: Inspect */}
                 <div className="space-y-4">
                   <label className="block">
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted">Token Contract Address</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted">Recovery Token Address</span>
                     <input
                       type="text"
                       value={recoveryTokenInput}
@@ -1506,7 +1534,7 @@ export function SplitApp() {
 
                       {/* Step 2: Recovery form */}
                       {Number(unallocatedBalance.unallocated) > 0 && !showRecoveryConfirm && (
-                        <div className="space-y-3 pt-2 border-t border-white/5">
+                      <div className="space-y-3 pt-2 border-t border-white/5">
                           <label className="block">
                             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted">Destination Address</span>
                             <input
@@ -1683,7 +1711,7 @@ export function SplitApp() {
             </div>
           </div>
         ) : activeTab === "create" ? (
-          <form onSubmit={onSubmit} className="glass-card rounded-[2.5rem] p-8 md:p-10 space-y-12">
+          <form onSubmit={handleSubmit(onSubmit)} className="glass-card rounded-[2.5rem] p-8 md:p-10 space-y-12">
             <div className="flex items-center justify-between border-b border-white/5 pb-6">
               <h2 className="font-display text-2xl tracking-tight">
                 Project Setup
@@ -1703,12 +1731,17 @@ export function SplitApp() {
                 </label>
                 <input
                   id="projectId"
-                  required
-                  value={projectId}
-                  onChange={(event) => setProjectId(event.target.value)}
                   placeholder="e.g. dawn_of_nova_01"
                   className="glass-input w-full rounded-2xl px-5 py-4 text-sm"
+                  {...register("projectId", {
+                    required: "Project identifier is required.",
+                  })}
                 />
+                {createFormErrors.projectId && (
+                  <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter">
+                    {createFormErrors.projectId.message}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <label
@@ -1719,19 +1752,42 @@ export function SplitApp() {
                 </label>
                 <input
                   id="title"
-                  required
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
                   placeholder="e.g. Dawn of Nova"
                   className="glass-input w-full rounded-2xl px-5 py-4 text-sm"
+                  {...register("title", {
+                    required: "Display title is required.",
+                  })}
                 />
+                {createFormErrors.title && (
+                  <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter">
+                    {createFormErrors.title.message}
+                  </p>
+                )}
               </div>
-              <TokenSelector
-                value={token}
-                onChange={setToken}
-                network={wallet.network}
-                required
+              <Controller
+                control={control}
+                name="token"
+                rules={{
+                  required: "Asset token is required.",
+                  validate: (value) =>
+                    StrKey.isValidEd25519PublicKey(value) || StrKey.isValidContract(value)
+                      ? true
+                      : "Enter a valid Stellar token address.",
+                }}
+                render={({ field }) => (
+                  <TokenSelector
+                    value={field.value}
+                    onChange={field.onChange}
+                    network={wallet.network}
+                    required
+                  />
+                )}
               />
+              {createFormErrors.token && (
+                <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter md:col-span-2 -mt-4">
+                  {createFormErrors.token.message}
+                </p>
+              )}
               <div className="space-y-2">
                 <label
                   htmlFor="projectType"
@@ -1741,12 +1797,17 @@ export function SplitApp() {
                 </label>
                 <input
                   id="projectType"
-                  required
-                  value={projectType}
-                  onChange={(event) => setProjectType(event.target.value)}
                   placeholder="e.g. Music, Film"
                   className="glass-input w-full rounded-2xl px-5 py-4 text-sm"
+                  {...register("projectType", {
+                    required: "Media category is required.",
+                  })}
                 />
+                {createFormErrors.projectType && (
+                  <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter">
+                    {createFormErrors.projectType.message}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1757,12 +1818,14 @@ export function SplitApp() {
                     Recipients
                   </h2>
                   <span className="rounded-lg bg-white/5 px-2.5 py-1 text-[10px] font-bold text-muted">
-                    {collaborators.length}
+                    {collaboratorFields.length}
                   </span>
                 </div>
                 <button
                   type="button"
-                  onClick={addCollaborator}
+                  onClick={() =>
+                    appendCollaborator({ address: "", alias: "", basisPoints: "0" })
+                  }
                   className="premium-button flex items-center gap-2 rounded-xl bg-greenMid/10 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-greenBright transition-all hover:bg-greenMid/20"
                 >
                   <svg
@@ -1783,107 +1846,133 @@ export function SplitApp() {
               </div>
 
               <div className="space-y-4">
-                {collaborators.map((collaborator, index) => (
-                  <div
-                    key={collaborator.id}
-                    className="group relative grid gap-6 rounded-3xl border border-white/5 bg-white/2 p-6 transition-all hover:bg-white/4 md:grid-cols-12 md:items-start"
-                  >
-                    <div className="md:col-span-5 space-y-2">
-                      <label
-                        htmlFor={`address-${collaborator.id}`}
-                        className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted/60 px-1"
-                      >
-                        Wallet Address
-                      </label>
-                      <input
-                        id={`address-${collaborator.id}`}
-                        required
-                        value={collaborator.address}
-                        onChange={(event) =>
-                          updateCollaborator(collaborator.id, {
-                            address: event.target.value,
-                          })
-                        }
-                        placeholder={`Recipient #${index + 1}`}
-                        className={clsx(
-                          "glass-input w-full rounded-xl px-4 py-3 text-sm",
-                          validationErrors[collaborator.id]
-                            ? "border-red-500/50 bg-red-500/5"
-                            : "",
-                        )}
-                      />
-                      {validationErrors[collaborator.id] && (
-                        <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter">
-                          {validationErrors[collaborator.id]}
-                        </p>
-                      )}
-                    </div>
-                    <div className="md:col-span-3 space-y-2">
-                      <label
-                        htmlFor={`alias-${collaborator.id}`}
-                        className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted/60 px-1"
-                      >
-                        Alias
-                      </label>
-                      <input
-                        id={`alias-${collaborator.id}`}
-                        required
-                        value={collaborator.alias}
-                        onChange={(event) =>
-                          updateCollaborator(collaborator.id, {
-                            alias: event.target.value,
-                          })
-                        }
-                        placeholder="e.g. Lead Vocals"
-                        className="glass-input w-full rounded-xl px-4 py-3 text-sm"
-                      />
-                    </div>
-                    <div className="md:col-span-3 space-y-2">
-                      <label
-                        htmlFor={`bp-${collaborator.id}`}
-                        className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted/60 px-1"
-                      >
-                        Share (BP)
-                      </label>
-                      <input
-                        id={`bp-${collaborator.id}`}
-                        required
-                        type="number"
-                        min={1}
-                        max={10_000}
-                        value={collaborator.basisPoints}
-                        onChange={(event) =>
-                          updateCollaborator(collaborator.id, {
-                            basisPoints: event.target.value,
-                          })
-                        }
-                        placeholder="5000"
-                        className="glass-input w-full rounded-xl px-4 py-3 text-sm"
-                      />
-                    </div>
-                    <div className="md:col-span-1 pt-8 flex justify-center">
-                      <button
-                        type="button"
-                        onClick={() => removeCollaborator(collaborator.id)}
-                        className="flex h-10 w-10 min-w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-400 opacity-0 transition-opacity hover:bg-red-500/20 group-hover:opacity-100"
-                      >
-                        <svg
-                          className="h-5 w-5 pointer-events-none"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={2}
+                {collaboratorFields.map((field, index) => {
+                  const addressError =
+                    createFormErrors.collaborators?.[index]?.address?.message ??
+                    collaboratorValidationErrors[field.id];
+                  const aliasError = createFormErrors.collaborators?.[index]?.alias?.message;
+                  const basisPointsError =
+                    createFormErrors.collaborators?.[index]?.basisPoints?.message;
+
+                  return (
+                    <div
+                      key={field.id}
+                      className="group relative grid gap-6 rounded-3xl border border-white/5 bg-white/2 p-6 transition-all hover:bg-white/4 md:grid-cols-12 md:items-start"
+                    >
+                      <div className="md:col-span-5 space-y-2">
+                        <label
+                          htmlFor={`address-${field.id}`}
+                          className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted/60 px-1"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
-                          />
-                        </svg>
-                      </button>
+                          Wallet Address
+                        </label>
+                        <input
+                          id={`address-${field.id}`}
+                          placeholder={`Recipient #${index + 1}`}
+                          className={clsx(
+                            "glass-input w-full rounded-xl px-4 py-3 text-sm",
+                            addressError ? "border-red-500/50 bg-red-500/5" : "",
+                          )}
+                          {...register(`collaborators.${index}.address`, {
+                            required: "Wallet address is required.",
+                            validate: (value) =>
+                              StrKey.isValidEd25519PublicKey(value) || StrKey.isValidContract(value)
+                                ? true
+                                : "Enter a valid Stellar address or contract ID.",
+                          })}
+                        />
+                        {addressError && (
+                          <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter">
+                            {addressError}
+                          </p>
+                        )}
+                      </div>
+                      <div className="md:col-span-3 space-y-2">
+                        <label
+                          htmlFor={`alias-${field.id}`}
+                          className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted/60 px-1"
+                        >
+                          Alias
+                        </label>
+                        <input
+                          id={`alias-${field.id}`}
+                          placeholder="e.g. Lead Vocals"
+                          className={clsx(
+                            "glass-input w-full rounded-xl px-4 py-3 text-sm",
+                            aliasError ? "border-red-500/50 bg-red-500/5" : "",
+                          )}
+                          {...register(`collaborators.${index}.alias`, {
+                            required: "Alias is required.",
+                          })}
+                        />
+                        {aliasError && (
+                          <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter">
+                            {aliasError}
+                          </p>
+                        )}
+                      </div>
+                      <div className="md:col-span-3 space-y-2">
+                        <label
+                          htmlFor={`bp-${field.id}`}
+                          className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted/60 px-1"
+                        >
+                          Share (BP)
+                        </label>
+                        <input
+                          id={`bp-${field.id}`}
+                          type="number"
+                          min={0}
+                          max={10_000}
+                          placeholder="5000"
+                          className={clsx(
+                            "glass-input w-full rounded-xl px-4 py-3 text-sm",
+                            basisPointsError ? "border-red-500/50 bg-red-500/5" : "",
+                          )}
+                          {...register(`collaborators.${index}.basisPoints`, {
+                            required: "Share is required.",
+                            validate: (value) => {
+                              const parsed = Number.parseInt(value, 10);
+                              if (!Number.isFinite(parsed) || parsed < 0) {
+                                return "Share must be a valid number.";
+                              }
+                              if (parsed > 10_000) {
+                                return "Share cannot exceed 10,000.";
+                              }
+                              return true;
+                            },
+                          })}
+                        />
+                        {basisPointsError && (
+                          <p className="px-1 text-[10px] font-bold text-red-400 uppercase tracking-tighter">
+                            {basisPointsError}
+                          </p>
+                        )}
+                      </div>
+                      <div className="md:col-span-1 pt-8 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => removeCollaborator(index)}
+                          disabled={collaboratorFields.length <= 2}
+                          className="flex h-10 w-10 min-w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-400 opacity-0 transition-opacity hover:bg-red-500/20 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-20"
+                        >
+                          <svg
+                            className="h-5 w-5 pointer-events-none"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+                            />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="flex flex-col items-end gap-3 px-4 py-6 rounded-3xl bg-white/2 border border-white/5">
@@ -1945,6 +2034,12 @@ export function SplitApp() {
 
             {receipt && receipt.action === "create" && (
               <TransactionReceiptView receipt={receipt} network={wallet.network} />
+            )}
+
+            {latestTxHash && (
+              <p className="px-4 text-[10px] font-mono text-muted break-all opacity-70">
+                Last transaction hash: {latestTxHash}
+              </p>
             )}
 
             {createdProject && (
@@ -2787,18 +2882,20 @@ export function SplitApp() {
           <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
             <div className="glass-card w-full max-w-lg rounded-[2.5rem] p-10 animate-in zoom-in-95 duration-200">
               <h2 className="font-display text-2xl mb-8">Edit Project Metadata</h2>
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Project Title</label>
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                  <label htmlFor="edit-project-title" className="text-[10px] font-bold uppercase tracking-widest text-muted">Project Title</label>
                   <input
+                    id="edit-project-title"
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
                     className="glass-input w-full rounded-2xl px-5 py-4 text-sm"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">Category</label>
+                  <label htmlFor="edit-project-type" className="text-[10px] font-bold uppercase tracking-widest text-muted">Category</label>
                   <input
+                    id="edit-project-type"
                     value={editProjectType}
                     onChange={(e) => setEditProjectType(e.target.value)}
                     className="glass-input w-full rounded-2xl px-5 py-4 text-sm"
