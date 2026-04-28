@@ -50,12 +50,12 @@ app.use(
   })
 );
 
-SplitNaira is in active development. This repo currently contains:
-
-- `contracts/` Soroban smart contract and tests
-- `frontend/` Next.js + Tailwind scaffold
-- `backend/` Express API scaffold
-- `demo/` Static HTML flow prototype
+// SplitNaira is in active development. This repo currently contains:
+//
+// - `contracts/` Soroban smart contract and tests
+// - `frontend/` Next.js + Tailwind scaffold
+// - `backend/` Express API scaffold
+// - `demo/` Static HTML flow prototype
 
 app.use("/health", readLimiter);
 app.use("/splits/admin", adminLimiter);
@@ -170,7 +170,6 @@ if (process.env.NODE_ENV !== "test") {
     }
   };
   // Immediately invoke
-  // eslint-disable-next-line @typescript-eslint/no-floating-promises
   start();
 }
 

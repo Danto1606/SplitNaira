@@ -1,5 +1,3 @@
-import { rpc, xdr, ScVal } from "@stellar/stellar-sdk";
-
 export enum ErrorType {
   CONTRACT = "CONTRACT",
   AUTH = "AUTH",
@@ -53,7 +51,7 @@ export class AppError extends Error {
     public code: ErrorCode,
     message: string,
     public remediation?: RemediationHint,
-    public details?: any
+    public details?: unknown
   ) {
     super(message);
     this.name = "AppError";
@@ -143,8 +141,15 @@ const CONTRACT_ERROR_MAP: Record<number, { code: ErrorCode; message: string; rem
   }
 };
 
-export function translateSorobanError(err: any): AppError {
-  const errorMessage = err?.message || String(err);
+export function translateSorobanError(err: unknown): AppError {
+  const errorMessage =
+    typeof err === "object" && err !== null && "message" in err
+      ? String((err as { message?: unknown }).message ?? "")
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  const originalError = err;
+  const stack = err instanceof Error ? err.stack : undefined;
 
   // 1. Handle HTTP/RPC connectivity issues
   if (errorMessage.includes("fetch failed") || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("Network Error")) {
@@ -157,7 +162,16 @@ export function translateSorobanError(err: any): AppError {
   }
 
   // 2. Handle Simulation Failures (Host & Contract Errors)
-  const simulationResult = err?.simulationResult || err?.response?.results?.[0];
+  const simulationResult =
+    typeof err === "object" && err !== null
+      ? (err as {
+          simulationResult?: { error?: string };
+          response?: { results?: Array<{ error?: string }> };
+        }).simulationResult ||
+        (err as {
+          response?: { results?: Array<{ error?: string }> };
+        }).response?.results?.[0]
+      : undefined;
   const rawError = simulationResult?.error || errorMessage;
   
   if (rawError) {
@@ -209,6 +223,16 @@ export function translateSorobanError(err: any): AppError {
         { rawError }
       );
     }
+
+    if (simulationResult) {
+      return new AppError(
+        ErrorType.RPC,
+        ErrorCode.SIMULATION_FAILED,
+        "Soroban simulation failed",
+        { message: "The transaction simulation did not complete successfully.", action: "Review Transaction" },
+        { rawError, originalError }
+      );
+    }
   }
 
   // 3. Handle specific account errors
@@ -228,7 +252,7 @@ export function translateSorobanError(err: any): AppError {
       ErrorCode.CONTRACT_NOT_FOUND,
       "Resource not found",
       { message: "The requested resource could not be found on the network.", action: "Check Identifier" },
-      { originalError: err }
+      { originalError }
     );
   }
 
@@ -239,7 +263,7 @@ export function translateSorobanError(err: any): AppError {
     ErrorCode.INTERNAL_ERROR,
     errorMessage || "An unexpected error occurred",
     { message: "Our team has been notified. Please try again later." },
-    { stack: err.stack, originalError: err }
+    { stack, originalError }
   );
 }
 

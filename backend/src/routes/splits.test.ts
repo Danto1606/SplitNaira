@@ -57,9 +57,6 @@ vi.mock("@stellar/stellar-sdk", () => {
     rpc: {
       Server: vi.fn(() => serverMock),
     },
-    Address: vi.fn().mockImplementation((address: string) => ({
-      toScVal: () => ({ toXDR: () => `MOCKED_SCVAL_${address}` }),
-    })),
     xdr: {
       ScVal: {
         scvMap: (items: unknown[]) => items,

@@ -1,4 +1,3 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import { app } from "../index.js";
@@ -49,7 +48,7 @@ vi.mock("@stellar/stellar-sdk", () => {
 });
 
 vi.mock("../services/stellar.js", async (importOriginal) => {
-  const actual = await importOriginal<any>();
+  const actual = await importOriginal();
   return {
     ...actual,
     loadStellarConfig: vi.fn(() => ({
@@ -57,8 +56,6 @@ vi.mock("../services/stellar.js", async (importOriginal) => {
       sorobanRpcUrl: "http://rpc",
       networkPassphrase: "test",
       contractId: "CBLASIRZ7CUKC7S5IS3VSNMQGKZ5FTRWLHZZXH7H4YG6ZLRFPJF5H2LR",
-      simulatorAccount: "GD5T6IPRNCKFOHQ3STZ5BTEYI5V6U5U6U5U6U5U6U5U6U5U6U5U6U5U6"
-      contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
       simulatorAccount: "test_account"
     })),
     getStellarRpcServer: vi.fn(() => ({
@@ -75,10 +72,6 @@ vi.mock("../services/stellar.js", async (importOriginal) => {
       }),
       getEvents: vi.fn().mockResolvedValue({ events: [] })
     })),
-    getStellarRpcServer: vi.fn().mockImplementation(() => {
-      const { rpc } = (vi.mocked(await import("@stellar/stellar-sdk")));
-      return new rpc.Server("http://rpc");
-    })
     executeWithRetry: vi.fn(async (fn) => fn()),
     getCached: vi.fn(() => undefined),
     setCached: vi.fn(),
@@ -86,7 +79,6 @@ vi.mock("../services/stellar.js", async (importOriginal) => {
     invalidateCacheByPrefix: vi.fn(),
     getCacheStats: vi.fn(() => ({ hits: 0, misses: 0, evictions: 0 })),
     READ_CACHE_TTL_MS: 30000,
-    RequestValidationError
   };
 });
 

@@ -1,5 +1,8 @@
+import "reflect-metadata";
 import { DataSource } from "typeorm";
 import { getEnv } from "../config/env.js";
+import { User } from "../entities/User.js";
+import { TransactionRecord } from "../entities/Transaction.js";
 import { logger } from "./logger.js";
 
 let AppDataSource: DataSource | null = null;
@@ -33,7 +36,7 @@ export async function initDatabase(): Promise<DataSource> {
       url: databaseUrl,
       synchronize: process.env.NODE_ENV !== "production",
       logging: process.env.NODE_ENV === "development",
-      entities: ["src/entities/*.ts"],
+      entities: [User, TransactionRecord],
       migrations: ["src/migrations/*.ts"],
       migrationsTableName: "migrations",
       ssl: needsSsl
