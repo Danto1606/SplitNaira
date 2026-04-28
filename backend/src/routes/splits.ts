@@ -768,218 +768,22 @@ splitsRouter.post("/:projectId/lock", async (req: Request, res: Response, next: 
         "Invalid request payload.",
         { message: "Check owner address." }
       );
-splitsRouter.get("/admin/allowlist", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestId = res.locals.requestId;
-    const parsed = allowlistQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid query parameters.",
-        details: parsed.error.flatten(),
-        requestId
-      });
     }
 
-    const { start, limit } = parsed.data;
+    const result = await buildLockProjectUnsignedXdr({
+      projectId,
+      owner: parsedBody.data.owner
+    });
 
-    try {
-      const result = await buildLockProjectUnsignedXdr({
-        projectId: projectId,
-        owner: parsedBody.data.owner
-      const [adminRetval, countRetval, tokensRetval] = await Promise.all([
-        simulateReadOnlyContractCall("get_admin"),
-        simulateReadOnlyContractCall("get_allowed_token_count"),
-        simulateReadOnlyContractCall("get_allowed_tokens", [
-          xdr.ScVal.scvU32(start),
-          xdr.ScVal.scvU32(limit)
-        ])
-      ]);
-
-      const adminValue = adminRetval ? scValToNative(adminRetval) : null;
-      const countValue = countRetval ? scValToNative(countRetval) : 0;
-      const tokensValue = tokensRetval ? scValToNative(tokensRetval) : [];
-
-      return res.status(200).json({
-        admin: typeof adminValue === "string" ? adminValue : null,
-        allowedTokenCount: Number(countValue ?? 0),
-        tokens: Array.isArray(tokensValue) ? tokensValue.map(String) : [],
-        start,
-        limit
-      });
-    } catch (error) {
-      if (error instanceof RequestValidationError) {
-        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
-      }
-      throw error;
-    }
+    return res.status(200).json(result);
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
+    }
     return next(error);
   }
 });
 
-splitsRouter.post("/:projectId/deposit", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestId = res.locals.requestId;
-    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
-    if (!parsedId.success) {
-      throw new AppError(
-        ErrorType.VALIDATION,
-        ErrorCode.VALIDATION_ERROR,
-        "Invalid projectId format.",
-        undefined,
-        parsedId.error.flatten()
-      );
-    }
-    const projectId = parsedId.data;
-
-    const parsedBody = depositSchema.safeParse(req.body);
-
-    if (!parsedBody.success) {
-      throw new AppError(
-        ErrorType.VALIDATION,
-        ErrorCode.VALIDATION_ERROR,
-        "Invalid request payload.",
-        { message: "Check deposit details." }
-      );
-    }
-
-    try {
-      const result = await buildDepositUnsignedXdr({
-        projectId: projectId,
-        from: parsedBody.data.from,
-        amount: parsedBody.data.amount
-      });
-splitsRouter.post("/admin/allow-token", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestId = res.locals.requestId;
-    const parsed = adminTokenActionSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: parsed.error.flatten(),
-        requestId
-      });
-    }
-
-    try {
-      const result = await buildAdminTokenActionUnsignedXdr(parsed.data, "allow_token");
-      return res.status(200).json(result);
-    } catch (error) {
-      if (error instanceof RequestValidationError) {
-        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
-      }
-      throw error;
-    }
-  } catch (error) {
-    return next(error);
-  }
-});
-
-splitsRouter.put("/:projectId/collaborators", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestId = res.locals.requestId;
-    const parsedId = projectIdParamSchema.safeParse(req.params.projectId);
-    if (!parsedId.success) {
-      throw new AppError(
-        ErrorType.VALIDATION,
-        ErrorCode.VALIDATION_ERROR,
-        "Invalid projectId format.",
-        undefined,
-        parsedId.error.flatten()
-      );
-    }
-    const projectId = parsedId.data;
-
-    const parsedBody = updateCollaboratorsSchema.safeParse(req.body);
-
-    if (!parsedBody.success) {
-      throw new AppError(
-        ErrorType.VALIDATION,
-        ErrorCode.VALIDATION_ERROR,
-        "Invalid request payload.",
-        { message: "Check collaborator list." }
-      );
-    }
-
-    try {
-      const result = await buildUpdateCollaboratorsUnsignedXdr({
-        projectId: projectId,
-        owner: parsedBody.data.owner,
-        collaborators: parsedBody.data.collaborators
-      });
-splitsRouter.post("/admin/disallow-token", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestId = res.locals.requestId;
-    const parsed = adminTokenActionSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: parsed.error.flatten(),
-        requestId
-      });
-    }
-
-    try {
-      const result = await buildAdminTokenActionUnsignedXdr(parsed.data, "disallow_token");
-      return res.status(200).json(result);
-    } catch (error) {
-      if (error instanceof RequestValidationError) {
-        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
-      }
-      throw error;
-    }
-  } catch (error) {
-    return next(error);
-  }
-});
-
-splitsRouter.post("/:projectId/lock", async (req, res, next) => {
-  try {
-    const requestId = res.locals.requestId;
-    const parsed = createSplitSchema.safeParse(req.body);
-
-    if (!parsed.success) {
-      throw new AppError(
-        ErrorType.VALIDATION,
-        ErrorCode.VALIDATION_ERROR,
-        "Invalid request payload.",
-        { message: "Check the provided project details." }
-      );
-
-    const parsedParams = projectIdParamSchema.safeParse(req.params.projectId);
-    const parsedBody = lockProjectSchema.safeParse(req.body);
-
-    if (!parsedParams.success || !parsedBody.success) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Invalid request payload.",
-        details: {
-          params: parsedParams.success ? null : parsedParams.error.flatten(),
-          body: parsedBody.success ? null : parsedBody.error.flatten()
-        },
-        requestId
-      });
-    }
-
-    try {
-      const result = await buildLockProjectUnsignedXdr({
-        projectId: parsedParams.data,
-        owner: parsedBody.data.owner
-      });
-      return res.status(200).json(result);
-    } catch (error) {
-      if (error instanceof RequestValidationError) {
-        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
-      }
-      throw error;
-    }
-  } catch (error) {
-    return next(error);
-  }
-});
 
 splitsRouter.post("/:projectId/deposit", async (req, res, next) => {
   try {
