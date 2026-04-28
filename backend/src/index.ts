@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -14,7 +15,6 @@ import { globalLimiter, readLimiter, writeLimiter, adminLimiter, authLimiter } f
 import { validateEnv, printEnvDiagnostics } from "./config/env.js";
 import { initDatabase, closeDatabase } from "./services/database.js";
 import { logger } from "./services/logger.js";
-import { generateOpenApi } from "./openapi.js";
 
 dotenv.config();
 
@@ -50,13 +50,6 @@ app.use(
   })
 );
 
-SplitNaira is in active development. This repo currently contains:
-
-- `contracts/` Soroban smart contract and tests
-- `frontend/` Next.js + Tailwind scaffold
-- `backend/` Express API scaffold
-- `demo/` Static HTML flow prototype
-
 app.use("/health", readLimiter);
 app.use("/splits/admin", adminLimiter);
 app.use("/splits", (req, res, next) => {
@@ -88,9 +81,14 @@ app.use("/transactions", transactionsRouter);
 // ─── OpenAPI & Swagger Documentation ──────────────────────────────────────────
 
 // Serve OpenAPI spec as JSON
-app.get("/api/openapi.json", (_req, res) => {
-  const spec = generateOpenApi();
-  res.json(spec);
+app.get("/api/openapi.json", async (_req, res, next) => {
+  try {
+    const { generateOpenApi } = await import("./openapi.js");
+    const spec = generateOpenApi();
+    res.json(spec);
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Serve Swagger UI at /api/docs
@@ -170,7 +168,6 @@ if (process.env.NODE_ENV !== "test") {
     }
   };
   // Immediately invoke
-  // eslint-disable-next-line @typescript-eslint/no-floating-promises
   start();
 }
 
