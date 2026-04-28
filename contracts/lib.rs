@@ -437,6 +437,12 @@ impl SplitNairaContract {
     /// Distributes the target project's internal balance to all
     /// collaborators according to their basis point shares.
     ///
+    /// Compatibility-sensitive invariants:
+    /// - `distribution_round` increments exactly once per successful call
+    /// - `total_distributed` increases by the exact amount paid out
+    /// - the final collaborator receives any integer-division remainder so
+    ///   the full project balance is accounted for every round
+    ///
     /// Anyone can call distribute — the math is trustless.
     ///
     /// # Arguments
@@ -588,6 +594,10 @@ impl SplitNairaContract {
 
     /// Returns a list of projects with pagination.
     /// Does not bump TTL to avoid excessive storage writes during listing.
+    ///
+    /// Compatibility-sensitive invariant: results must stay aligned with
+    /// `get_project_ids(start, limit)` and preserve creation order even after
+    /// metadata edits, locking, deposits, or distributions.
     ///
     /// # Arguments
     /// * `start` - Starting index (0-based)
@@ -741,6 +751,9 @@ impl SplitNairaContract {
     /// Returns a paginated list of project IDs (Symbols) in creation order.
     /// Does not bump TTL to avoid excessive storage writes during listing.
     ///
+    /// Compatibility-sensitive invariant: this index is append-only in
+    /// creation order for the lifetime of the contract.
+    ///
     /// # Arguments
     /// * `start` - Zero-based index of the first project to return
     /// * `limit` - Maximum number of IDs to return
@@ -794,7 +807,9 @@ impl SplitNairaContract {
     /// Updates the `title` and `project_type` of an existing project.
     ///
     /// Only the project owner can call this, and only while the project is
-    /// unlocked.  Emits a `metadata_updated` event on success.
+    /// unlocked. Only these metadata fields are mutable; ownership, token,
+    /// collaborator splits, lock state, and payout accounting must remain
+    /// unchanged. Emits a `metadata_updated` event on success.
     ///
     /// # Errors
     /// * `SplitError::NotFound`     - if the project does not exist

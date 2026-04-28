@@ -21,11 +21,19 @@ import {
   distributeSchema,
   historyQuerySchema,
   projectIdParamSchema,
+  stellarAddressSchema,
 } from "./routes/splits.js";
 
 const registry = new OpenAPIRegistry();
 
 // ─── Components ───────────────────────────────────────────────────────────────
+
+// SplitNaira is in active development. This repo currently contains:
+
+// - `contracts/` Soroban smart contract and tests
+// - `frontend/` Next.js + Tailwind scaffold
+// - `backend/` Express API scaffold
+// - `demo/` Static HTML flow prototype
 
 const ProjectSchema = registry.register(
   "Project",
@@ -265,29 +273,40 @@ registry.registerPath({
   },
 });
 
+const ClaimableResponseSchema = registry.register(
+  "ClaimableResponse",
+  z.object({
+    projectId: z.string().describe("The project ID"),
+    collaborator: z.string().describe("Stellar address of the collaborator"),
+    claimable: z.string().describe("Amount available to claim, in stroops"),
+    claimed: z.string().describe("Amount already claimed, in stroops"),
+    total: z.string().describe("Total allocated (claimed + claimable), in stroops"),
+  })
+);
+
 registry.registerPath({
   method: "get",
-  path: "/splits/{projectId}/claimable/{address}",
-  summary: "Get claimable info for a collaborator",
+  path: "/splits/{projectId}/claimable/{collaborator}",
+  summary: "Get claimable payout information for a collaborator",
   tags: ["Splits"],
   request: {
     params: z.object({
       projectId: projectIdParamSchema,
-      address: z.string(),
+      collaborator: stellarAddressSchema.describe("Stellar address of the collaborator"),
     }),
   },
   responses: {
     200: {
-      description: "Claimable info",
+      description: "Claimable payout information",
       content: {
         "application/json": {
-          schema: z.object({
-            claimed: z.number(),
-            claimable: z.number(),
-          }),
+          schema: ClaimableResponseSchema,
         },
       },
     },
+    400: { description: "Validation error — invalid projectId or collaborator address" },
+    404: { description: "Project not found or collaborator has no claimable info" },
+    500: { description: "Contract or server failure" },
   },
 });
 
