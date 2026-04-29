@@ -280,7 +280,7 @@ export function translateSorobanError(err: unknown): AppError {
   // 2. Handle Simulation Failures (Host & Contract Errors)
   const simulationResultError = getSimulationResultError(err);
   const rawError = simulationResultError || errorMessage;
-  
+
   if (rawError) {
     const translatedRawError = translateRawSorobanError(rawError);
     if (translatedRawError) {
@@ -328,4 +328,3 @@ export function translateSorobanError(err: unknown): AppError {
     { stack: getErrorStack(err), originalError: err }
   );
 }
-

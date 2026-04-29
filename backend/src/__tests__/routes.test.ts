@@ -1,6 +1,86 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app } from "../index.js";
+
+vi.mock("@stellar/stellar-sdk", () => {
+  return {
+    Address: {
+      fromString: vi.fn((address) => ({
+        toScVal: () => ({ address }),
+        toString: () => address
+      }))
+    },
+    BASE_FEE: "100",
+    Contract: vi.fn().mockImplementation(() => ({
+      call: vi.fn().mockReturnValue({})
+    })),
+    TransactionBuilder: vi.fn().mockImplementation(() => ({
+      addOperation: vi.fn().mockReturnThis(),
+      setTimeout: vi.fn().mockReturnThis(),
+      build: vi.fn().mockReturnValue({
+        toXDR: () => "test_xdr"
+      })
+    })),
+    nativeToScVal: vi.fn((val) => ({ val })),
+    scValToNative: vi.fn((val) => val),
+    rpc: {
+      Server: vi.fn().mockImplementation(() => ({
+        getAccount: vi.fn().mockResolvedValue({
+          accountId: () => "GD5T6IPRNCKFOHQ3STZ5BTEYI5V6U5U6U5U6U5U6U5U6U5U6U5U6U5U6",
+          sequenceNumber: () => "1",
+          sequence: "1"
+        }),
+        simulateTransaction: vi.fn().mockResolvedValue({ result: { retval: [] } }),
+        prepareTransaction: vi.fn().mockResolvedValue({
+          toXDR: () => "test_xdr",
+          sequence: "1",
+          fee: "100"
+        })
+      }))
+    },
+    xdr: {
+      ScVal: {
+        scvU32: vi.fn(),
+        scvVec: vi.fn()
+      }
+    }
+  };
+});
+
+vi.mock("../services/stellar.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    loadStellarConfig: vi.fn(() => ({
+      horizonUrl: "http://horizon",
+      sorobanRpcUrl: "http://rpc",
+      networkPassphrase: "test",
+      contractId: "CBLASIRZ7CUKC7S5IS3VSNMQGKZ5FTRWLHZZXH7H4YG6ZLRFPJF5H2LR",
+      simulatorAccount: "test_account"
+    })),
+    getStellarRpcServer: vi.fn(() => ({
+      getAccount: vi.fn().mockResolvedValue({
+        accountId: () => "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        sequenceNumber: () => "1",
+        incrementSequenceNumber: vi.fn()
+      }),
+      simulateTransaction: vi.fn().mockResolvedValue({ result: { retval: null } }),
+      prepareTransaction: vi.fn().mockResolvedValue({
+        toXDR: () => "test_xdr",
+        sequence: "1",
+        fee: "100"
+      }),
+      getEvents: vi.fn().mockResolvedValue({ events: [] })
+    })),
+    executeWithRetry: vi.fn(async (fn) => fn()),
+    getCached: vi.fn(() => undefined),
+    setCached: vi.fn(),
+    invalidateCache: vi.fn(),
+    invalidateCacheByPrefix: vi.fn(),
+    getCacheStats: vi.fn(() => ({ hits: 0, misses: 0, evictions: 0 })),
+    READ_CACHE_TTL_MS: 30000,
+  };
+});
 
 describe("Route Integration Tests", () => {
   beforeAll(() => {
