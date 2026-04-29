@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -6,6 +7,7 @@ import dotenv from "dotenv";
 import swaggerUi from "swagger-ui-express";
 import { healthRouter } from "./routes/health.js";
 import { splitsRouter } from "./routes/splits.js";
+import { docsRouter } from "./routes/docs.js";
 import { usersRouter } from "./routes/users.js";
 import { transactionsRouter } from "./routes/transactions.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
@@ -14,7 +16,6 @@ import { globalLimiter, readLimiter, writeLimiter, adminLimiter, authLimiter } f
 import { validateEnv, printEnvDiagnostics } from "./config/env.js";
 import { initDatabase, closeDatabase } from "./services/database.js";
 import { logger } from "./services/logger.js";
-import { generateOpenApi } from "./openapi.js";
 
 dotenv.config();
 
@@ -32,8 +33,19 @@ app.use(helmet());
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: "1mb" }));
 app.use(requestIdMiddleware);
+
 // Global safety-net — must run before all route-specific limiters (#290)
 app.use(globalLimiter);
+
+// Swagger UI needs inline scripts/styles — relax CSP only for /docs
+app.use("/docs", (_req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+  );
+  next();
+});
+
 app.use(
   morgan((tokens, req, res) => {
     const requestId = res.locals.requestId ?? req.header("x-request-id") ?? "-";
@@ -49,13 +61,6 @@ app.use(
     ].join(" ");
   })
 );
-
-SplitNaira is in active development. This repo currently contains:
-
-- `contracts/` Soroban smart contract and tests
-- `frontend/` Next.js + Tailwind scaffold
-- `backend/` Express API scaffold
-- `demo/` Static HTML flow prototype
 
 app.use("/health", readLimiter);
 app.use("/splits/admin", adminLimiter);
@@ -82,15 +87,21 @@ app.get("/", (_req, res) => {
 
 app.use("/health", healthRouter);
 app.use("/splits", splitsRouter);
+app.use("/docs", docsRouter);
 app.use("/users", usersRouter);
 app.use("/transactions", transactionsRouter);
 
 // ─── OpenAPI & Swagger Documentation ──────────────────────────────────────────
 
 // Serve OpenAPI spec as JSON
-app.get("/api/openapi.json", (_req, res) => {
-  const spec = generateOpenApi();
-  res.json(spec);
+app.get("/api/openapi.json", async (_req, res, next) => {
+  try {
+    const { generateOpenApi } = await import("./openapi.js");
+    const spec = generateOpenApi();
+    res.json(spec);
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Serve Swagger UI at /api/docs
@@ -116,7 +127,6 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 if (process.env.NODE_ENV !== "test") {
-  // Startup wrapper to allow clean fatal handling
   const start = async () => {
     try {
       if (process.env.NODE_ENV !== "production") {
@@ -169,8 +179,6 @@ if (process.env.NODE_ENV !== "test") {
       process.exit(1);
     }
   };
-  // Immediately invoke
   // eslint-disable-next-line @typescript-eslint/no-floating-promises
   start();
 }
-
