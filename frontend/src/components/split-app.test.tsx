@@ -420,8 +420,8 @@ describe("SplitApp admin allowlist flow", () => {
   it("shows the admin allowlist panel for the configured admin wallet", async () => {
     renderSplitApp();
 
-    expect(await screen.findByText("Admin Token Allowlist")).toBeInTheDocument();
-    expect(screen.getByText("CTOKEN1")).toBeInTheDocument();
+    expect(await screen.findByText("Admin Token Allowlist")).toBeTruthy();
+    expect(screen.getByText("CTOKEN1")).toBeTruthy();
   });
 
   it("hides the admin allowlist panel for a non-admin wallet", async () => {
@@ -436,7 +436,7 @@ describe("SplitApp admin allowlist flow", () => {
     renderSplitApp();
 
     await waitFor(() => {
-      expect(screen.queryByText("Admin Token Allowlist")).not.toBeInTheDocument();
+      expect(screen.queryByText("Admin Token Allowlist")).toBeNull();
     });
   });
 

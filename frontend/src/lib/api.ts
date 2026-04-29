@@ -1,5 +1,7 @@
 import type { SplitProject } from "./stellar";
 import { getEnv } from "./env";
+import type { SplitProject } from "./stellar";
+import { getEnv } from "./env";
 
 const API_BASE_URL = getEnv().NEXT_PUBLIC_API_BASE_URL;
 
