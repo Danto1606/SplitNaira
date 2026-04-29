@@ -287,7 +287,6 @@ async function buildCreateProjectUnsignedXdr(
   let sourceAccount;
   try {
     sourceAccount = await executeWithRetry(() => server.getAccount(input.owner));
-
   } catch {
     throw new RequestValidationError("owner account not found on selected network");
   }
@@ -721,6 +720,9 @@ splitsRouter.post("/:projectId/lock", async (req: Request, res: Response, next: 
 
     return res.status(200).json(result);
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
+    }
     return next(error);
   }
 });
@@ -754,16 +756,16 @@ splitsRouter.get("/admin/allowlist", async (req: Request, res: Response, next: N
       const countValue = countRetval ? scValToNative(countRetval) : 0;
       const tokensValue = tokensRetval ? scValToNative(tokensRetval) : [];
 
-      return res.status(200).json({
-        admin: typeof adminValue === "string" ? adminValue : null,
-        allowedTokenCount: Number(countValue ?? 0),
-        tokens: Array.isArray(tokensValue) ? tokensValue.map(String) : [],
-        start,
-        limit
-      });
+      return res.status(200).json(
+        serializeBigInts({ admin: adminValue, count: countValue, tokens: tokensValue })
+      );
     } catch (error) {
       if (error instanceof RequestValidationError) {
-        throw new AppError(ErrorType.VALIDATION, ErrorCode.VALIDATION_ERROR, error.message);
+        return res.status(400).json({
+          error: "validation_error",
+          message: error.message,
+          requestId
+        });
       }
       throw error;
     }
@@ -954,8 +956,8 @@ splitsRouter.post("/:projectId/distribute", async (req: Request, res: Response, 
     const parsedBody = distributeSchema.safeParse(req.body);
     if (!parsedBody.success) {
       throw new AppError(
-        ErrorType.VALIDATION, 
-        ErrorCode.VALIDATION_ERROR, 
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
         "Invalid request payload.",
         { message: "Check the distribution request body." },
         parsedBody.error.flatten()
@@ -1402,8 +1404,8 @@ splitsRouter.get("/:projectId/history", async (req: Request, res: Response, next
     const parsedQuery = historyQuerySchema.safeParse(req.query);
     if (!parsedQuery.success) {
       throw new AppError(
-        ErrorType.VALIDATION, 
-        ErrorCode.VALIDATION_ERROR, 
+        ErrorType.VALIDATION,
+        ErrorCode.VALIDATION_ERROR,
         "Invalid query parameters.",
         { message: "Check cursor and limit parameters." }
       );
@@ -1484,14 +1486,8 @@ splitsRouter.get("/:projectId/history", async (req: Request, res: Response, next
 
 // ============================================================
 // Issue #152: Admin contract-state read routes
-// Expose get_admin, is_token_allowed, get_allowed_token_count,
-// and is_distributions_paused as cohesive read endpoints.
 // ============================================================
 
-/**
- * GET /splits/admin/status
- * Returns the current admin address and whether distributions are paused.
- */
 splitsRouter.get("/admin/status", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
@@ -1520,10 +1516,6 @@ const isTokenAllowedQuerySchema = z.object({
   token: stellarAddressSchema.describe("token contract address to check")
 });
 
-/**
- * GET /splits/admin/is-token-allowed?token=<address>
- * Returns whether the given token is on the contract allowlist.
- */
 splitsRouter.get("/admin/is-token-allowed", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
@@ -1555,10 +1547,6 @@ splitsRouter.get("/admin/is-token-allowed", async (req: Request, res: Response, 
   }
 });
 
-/**
- * GET /splits/admin/token-count
- * Returns the current number of allowlisted tokens.
- */
 splitsRouter.get("/admin/token-count", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
@@ -1579,18 +1567,12 @@ splitsRouter.get("/admin/token-count", async (req: Request, res: Response, next:
 
 // ============================================================
 // Issue #166: Unallocated token recovery routes
-// Inspect and recover tokens that landed in the contract address
-// outside of any tracked project balance.
 // ============================================================
 
 const unallocatedQuerySchema = z.object({
   token: stellarAddressSchema.describe("token contract address")
 });
 
-/**
- * GET /splits/admin/unallocated?token=<address>
- * Returns the unallocated (recoverable) balance for a token in the contract.
- */
 splitsRouter.get("/admin/unallocated", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
@@ -1676,7 +1658,6 @@ async function buildWithdrawUnallocatedUnsignedXdr(input: WithdrawUnallocatedReq
       sequenceNumber: preparedTx.sequence,
       fee: preparedTx.fee,
       operation: "withdraw_unallocated",
-      // Audit context included so operators can later understand what was recovered
       auditContext: {
         token: input.token,
         destination: input.to,
@@ -1687,11 +1668,6 @@ async function buildWithdrawUnallocatedUnsignedXdr(input: WithdrawUnallocatedReq
   };
 }
 
-/**
- * POST /splits/admin/withdraw-unallocated
- * Builds an unsigned XDR transaction to recover unallocated tokens.
- * The response includes audit context (token, destination, amount, timestamp).
- */
 splitsRouter.post("/admin/withdraw-unallocated", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requestId = res.locals.requestId;
@@ -1723,10 +1699,6 @@ splitsRouter.post("/admin/withdraw-unallocated", async (req: Request, res: Respo
 // Cache diagnostics (non-sensitive internal endpoint)
 // ============================================================
 
-/**
- * GET /splits/admin/cache-stats
- * Returns current in-memory cache occupancy for operational visibility.
- */
 splitsRouter.get("/admin/cache-stats", (_req: Request, res: Response) => {
   res.status(200).json({ ...getCacheStats(), ttlMs: READ_CACHE_TTL_MS });
 });
