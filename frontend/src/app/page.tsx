@@ -1,5 +1,7 @@
-import { SplitApp } from "@/components/split-app";
+import { redirect } from "next/navigation";
 
-export default function Home() {
-  return <SplitApp />;
+import { routing } from "@/i18n/routing";
+
+export default function IndexPage() {
+  redirect(`/${routing.defaultLocale}`);
 }

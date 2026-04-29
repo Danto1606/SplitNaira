@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { DM_Sans, Syne } from "next/font/google";
+import { getLocale } from "next-intl/server";
 import "./globals.css";
 import { ToastProvider } from "@/components/toast-provider";
+import { WalletProvider } from "@/components/wallet-provider";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
+import { QueryProvider } from "@/components/query-provider";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -21,16 +24,22 @@ export const metadata: Metadata = {
   description: "Royalty splitting for creative collaborators on Stellar."
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: {
   children: React.ReactNode;
 }) {
+  const locale = await getLocale();
+
   return (
-    <html lang="en">
+    <html lang={locale}>
       <body className={`${dmSans.variable} ${syne.variable} antialiased`}>
         <AppErrorBoundary>
-          <ToastProvider>{children}</ToastProvider>
+          <QueryProvider>
+            <ToastProvider>
+              <WalletProvider>{children}</WalletProvider>
+            </ToastProvider>
+          </QueryProvider>
         </AppErrorBoundary>
       </body>
     </html>

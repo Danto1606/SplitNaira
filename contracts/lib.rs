@@ -6,7 +6,10 @@ use soroban_sdk::{
 
 mod errors;
 mod events;
-use events::{DepositReceived, DistributionComplete, MetadataUpdated, PaymentSent, ProjectCreated, ProjectLocked, UnallocatedWithdrawn};
+use events::{
+    DepositReceived, DistributionComplete, MetadataUpdated, OwnershipTransferred, PaymentSent,
+    ProjectCreated, ProjectLocked, UnallocatedWithdrawn,
+};
 #[cfg(test)]
 mod tests;
 
@@ -78,10 +81,13 @@ pub enum DataKey {
     Admin,
     /// Number of allowlisted token contract addresses
     AllowedTokenCount,
+    /// Ordered list of allowlisted token contract addresses
+    AllowedTokenList,
     /// Allowlisted token contract address marker
     AllowedToken(Address),
     /// Global flag to pause all distributions (emergency stop)
     DistributionsPaused,
+}
 
 /// Returned by `get_claimable`: how much a collaborator has received and the
 /// last distribution round the project has completed.
@@ -129,18 +135,20 @@ impl SplitNairaContract {
     /// Pauses all distributions (emergency stop). Only contract admin can call.
     pub fn pause_distributions(env: Env, admin: Address) -> Result<(), SplitError> {
         Self::require_contract_admin(&env, &admin)?;
-        admin.require_auth();
 
-        env.storage().persistent().set(&DataKey::DistributionsPaused, &true);
+        env.storage()
+            .persistent()
+            .set(&DataKey::DistributionsPaused, &true);
         Ok(())
     }
 
     /// Unpauses distributions. Only contract admin can call.
     pub fn unpause_distributions(env: Env, admin: Address) -> Result<(), SplitError> {
         Self::require_contract_admin(&env, &admin)?;
-        admin.require_auth();
 
-        env.storage().persistent().set(&DataKey::DistributionsPaused, &false);
+        env.storage()
+            .persistent()
+            .set(&DataKey::DistributionsPaused, &false);
         Ok(())
     }
 
@@ -148,10 +156,20 @@ impl SplitNairaContract {
     pub fn allow_token(env: Env, admin: Address, token: Address) -> Result<(), SplitError> {
         Self::require_contract_admin(&env, &admin)?;
 
-        let key = DataKey::AllowedToken(token);
+        let key = DataKey::AllowedToken(token.clone());
         let is_already_allowed = env.storage().persistent().has(&key);
         if !is_already_allowed {
             env.storage().persistent().set(&key, &true);
+
+            let mut allowed_tokens: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Vec<Address>>(&DataKey::AllowedTokenList)
+                .unwrap_or(Vec::new(&env));
+            allowed_tokens.push_back(token);
+            env.storage()
+                .persistent()
+                .set(&DataKey::AllowedTokenList, &allowed_tokens);
 
             let count: u32 = env
                 .storage()
@@ -170,10 +188,25 @@ impl SplitNairaContract {
     pub fn disallow_token(env: Env, admin: Address, token: Address) -> Result<(), SplitError> {
         Self::require_contract_admin(&env, &admin)?;
 
-        let key = DataKey::AllowedToken(token);
+        let key = DataKey::AllowedToken(token.clone());
         let was_allowed = env.storage().persistent().has(&key);
         if was_allowed {
             env.storage().persistent().remove(&key);
+
+            let allowed_tokens: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Vec<Address>>(&DataKey::AllowedTokenList)
+                .unwrap_or(Vec::new(&env));
+            let mut filtered_tokens = Vec::new(&env);
+            for allowed_token in allowed_tokens.iter() {
+                if allowed_token != token {
+                    filtered_tokens.push_back(allowed_token);
+                }
+            }
+            env.storage()
+                .persistent()
+                .set(&DataKey::AllowedTokenList, &filtered_tokens);
 
             let count: u32 = env
                 .storage()
@@ -269,7 +302,11 @@ impl SplitNairaContract {
             .set(&DataKey::ProjectIds, &project_ids);
 
         // Emit creation event
-        ProjectCreated { project_id: project_id.clone(), owner: owner.clone() }.publish(&env);
+        ProjectCreated {
+            project_id: project_id.clone(),
+            owner: owner.clone(),
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -337,8 +374,12 @@ impl SplitNairaContract {
         env.storage()
             .persistent()
             .set(&DataKey::Project(project_id.clone()), &project);
+        Self::bump_project_ttl(&env, &project_id);
 
-        ProjectLocked { project_id: project_id.clone() }.publish(&env);
+        ProjectLocked {
+            project_id: project_id.clone(),
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -376,8 +417,15 @@ impl SplitNairaContract {
         env.storage()
             .persistent()
             .set(&DataKey::ProjectBalance(project_id.clone()), &new_balance);
+        Self::bump_project_ttl(&env, &project_id);
 
-        DepositReceived { project_id: project_id.clone(), from: from.clone(), amount, project_balance: new_balance }.publish(&env);
+        DepositReceived {
+            project_id: project_id.clone(),
+            from: from.clone(),
+            amount,
+            project_balance: new_balance,
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -389,6 +437,12 @@ impl SplitNairaContract {
     /// Distributes the target project's internal balance to all
     /// collaborators according to their basis point shares.
     ///
+    /// Compatibility-sensitive invariants:
+    /// - `distribution_round` increments exactly once per successful call
+    /// - `total_distributed` increases by the exact amount paid out
+    /// - the final collaborator receives any integer-division remainder so
+    ///   the full project balance is accounted for every round
+    ///
     /// Anyone can call distribute — the math is trustless.
     ///
     /// # Arguments
@@ -399,9 +453,7 @@ impl SplitNairaContract {
     /// * `SplitError::NotFound`   - if project doesn't exist
     /// * `SplitError::NoBalance`  - if contract has zero balance
     pub fn distribute(env: Env, project_id: Symbol) -> Result<(), SplitError> {
-        let mut project = Self::get_project_or_err(&env, &project_id)?;
-
-        // Check if distributions are paused
+        // Check if distributions are paused before touching project state.
         let paused: bool = env
             .storage()
             .persistent()
@@ -410,6 +462,8 @@ impl SplitNairaContract {
         if paused {
             return Err(SplitError::DistributionsPaused);
         }
+
+        let mut project = Self::get_project_or_err(&env, &project_id)?;
 
         // Read project-scoped distributable balance.
         let balance: i128 = env
@@ -452,10 +506,16 @@ impl SplitNairaContract {
                     &DataKey::Claimed(project_id.clone(), collab.address.clone()),
                     &(prev_claimed + amount),
                 );
+                Self::bump_claimed_ttl(&env, &project_id, &collab.address);
 
                 total_sent += amount;
 
-                PaymentSent { project_id: project_id.clone(), recipient: collab.address.clone(), amount }.publish(&env);
+                PaymentSent {
+                    project_id: project_id.clone(),
+                    recipient: collab.address.clone(),
+                    amount,
+                }
+                .publish(&env);
             }
         }
 
@@ -472,7 +532,12 @@ impl SplitNairaContract {
             .set(&DataKey::Project(project_id.clone()), &project);
         Self::bump_project_ttl(&env, &project_id);
 
-        DistributionComplete { project_id: project_id.clone(), round: project.distribution_round, total: total_sent }.publish(&env);
+        DistributionComplete {
+            project_id: project_id.clone(),
+            round: project.distribution_round,
+            total: total_sent,
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -500,10 +565,23 @@ impl SplitNairaContract {
 
     /// Returns how much a specific address has been paid for a project.
     pub fn get_claimed(env: Env, project_id: Symbol, address: Address) -> i128 {
+        if Self::has_project(&env, &project_id) {
+            Self::bump_project_ttl(&env, &project_id);
+            Self::bump_claimed_ttl(&env, &project_id, &address);
+        }
         env.storage()
             .persistent()
             .get::<DataKey, i128>(&DataKey::Claimed(project_id, address))
             .unwrap_or(0)
+    }
+
+    /// Explicit, permissionless storage maintenance endpoint.
+    ///
+    /// Operators can call this for inactive-but-important projects to keep
+    /// project state and collaborator claimed ledgers alive over long periods.
+    pub fn refresh_project_storage(env: Env, project_id: Symbol) -> Result<(), SplitError> {
+        Self::get_project_or_err(&env, &project_id)?;
+        Ok(())
     }
 
     /// Returns the total number of projects created on this contract.
@@ -516,6 +594,10 @@ impl SplitNairaContract {
 
     /// Returns a list of projects with pagination.
     /// Does not bump TTL to avoid excessive storage writes during listing.
+    ///
+    /// Compatibility-sensitive invariant: results must stay aligned with
+    /// `get_project_ids(start, limit)` and preserve creation order even after
+    /// metadata edits, locking, deposits, or distributions.
     ///
     /// # Arguments
     /// * `start` - Starting index (0-based)
@@ -552,7 +634,6 @@ impl SplitNairaContract {
 
         result
     }
-
 
     /// Returns the project-scoped distributable balance.
     pub fn get_balance(env: Env, project_id: Symbol) -> Result<i128, SplitError> {
@@ -603,7 +684,14 @@ impl SplitNairaContract {
         token_client.transfer(&contract_address, &to, &amount);
 
         let remaining = available - amount;
-        UnallocatedWithdrawn { token: token.clone(), admin: admin.clone(), to: to.clone(), amount, remaining_unallocated: remaining }.publish(&env);
+        UnallocatedWithdrawn {
+            token: token.clone(),
+            admin: admin.clone(),
+            to: to.clone(),
+            amount,
+            remaining_unallocated: remaining,
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -629,6 +717,30 @@ impl SplitNairaContract {
             .unwrap_or(0)
     }
 
+    /// Returns a paginated list of allowlisted token addresses.
+    pub fn get_allowed_tokens(env: Env, start: u32, limit: u32) -> Vec<Address> {
+        let allowed_tokens: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Vec<Address>>(&DataKey::AllowedTokenList)
+            .unwrap_or(Vec::new(&env));
+
+        let total = allowed_tokens.len();
+        if start >= total {
+            return Vec::new(&env);
+        }
+
+        let end = (start + limit).min(total);
+        let mut result = Vec::new(&env);
+        for i in start..end {
+            if let Some(token) = allowed_tokens.get(i) {
+                result.push_back(token);
+            }
+        }
+
+        result
+    }
+
     /// Returns the configured contract admin, if set.
     pub fn get_admin(env: Env) -> Option<Address> {
         env.storage()
@@ -638,6 +750,9 @@ impl SplitNairaContract {
 
     /// Returns a paginated list of project IDs (Symbols) in creation order.
     /// Does not bump TTL to avoid excessive storage writes during listing.
+    ///
+    /// Compatibility-sensitive invariant: this index is append-only in
+    /// creation order for the lifetime of the contract.
     ///
     /// # Arguments
     /// * `start` - Zero-based index of the first project to return
@@ -677,6 +792,7 @@ impl SplitNairaContract {
         collaborator: Address,
     ) -> Result<ClaimableInfo, SplitError> {
         let project = Self::get_project_or_err(&env, &project_id)?;
+        Self::bump_claimed_ttl(&env, &project_id, &collaborator);
         let claimed = env
             .storage()
             .persistent()
@@ -691,7 +807,9 @@ impl SplitNairaContract {
     /// Updates the `title` and `project_type` of an existing project.
     ///
     /// Only the project owner can call this, and only while the project is
-    /// unlocked.  Emits a `metadata_updated` event on success.
+    /// unlocked. Only these metadata fields are mutable; ownership, token,
+    /// collaborator splits, lock state, and payout accounting must remain
+    /// unchanged. Emits a `metadata_updated` event on success.
     ///
     /// # Errors
     /// * `SplitError::NotFound`     - if the project does not exist
@@ -722,7 +840,54 @@ impl SplitNairaContract {
             .set(&DataKey::Project(project_id.clone()), &project);
         Self::bump_project_ttl(&env, &project_id);
 
-        MetadataUpdated { project_id: project_id.clone() }.publish(&env);
+        MetadataUpdated {
+            project_id: project_id.clone(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    // ----------------------------------------------------------
+    // TRANSFER OWNERSHIP
+    // ----------------------------------------------------------
+
+    /// Transfers ownership of a project to a new address.
+    ///
+    /// Only the current owner can call this. Works on both locked and unlocked
+    /// projects — ownership transfer does not depend on lock state. The new
+    /// owner gains all owner-gated capabilities (update metadata, update
+    /// collaborators on unlocked projects, lock, transfer again).
+    ///
+    /// # Errors
+    /// * `SplitError::NotFound`     - if the project does not exist
+    /// * `SplitError::Unauthorized` - if caller is not the current owner
+    pub fn transfer_project_ownership(
+        env: Env,
+        project_id: Symbol,
+        current_owner: Address,
+        new_owner: Address,
+    ) -> Result<(), SplitError> {
+        let mut project = Self::get_project_or_err(&env, &project_id)?;
+
+        if project.owner != current_owner {
+            return Err(SplitError::Unauthorized);
+        }
+        current_owner.require_auth();
+
+        let previous_owner = project.owner.clone();
+        project.owner = new_owner.clone();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Project(project_id.clone()), &project);
+        Self::bump_project_ttl(&env, &project_id);
+
+        OwnershipTransferred {
+            project_id: project_id.clone(),
+            previous_owner,
+            new_owner,
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -763,6 +928,18 @@ impl SplitNairaContract {
             PROJECT_TTL_THRESHOLD_LEDGERS,
             PROJECT_TTL_BUMP_LEDGERS,
         );
+    }
+
+    /// Extends TTL for collaborator-level claimed ledger when the key exists.
+    fn bump_claimed_ttl(env: &Env, project_id: &Symbol, collaborator: &Address) {
+        let claimed_key = DataKey::Claimed(project_id.clone(), collaborator.clone());
+        if env.storage().persistent().has(&claimed_key) {
+            env.storage().persistent().extend_ttl(
+                &claimed_key,
+                PROJECT_TTL_THRESHOLD_LEDGERS,
+                PROJECT_TTL_BUMP_LEDGERS,
+            );
+        }
     }
 
     fn require_contract_admin(env: &Env, admin: &Address) -> Result<(), SplitError> {

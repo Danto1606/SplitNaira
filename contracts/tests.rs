@@ -3,7 +3,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events as _},
-    token, Address, Env, String, Symbol, Vec, vec,
+    token, vec, Address, Env, IntoVal, String, Symbol, Vec,
 };
 
 // ============================================================
@@ -365,6 +365,40 @@ fn test_allowlist_turns_off_after_last_token_is_removed() {
     );
 
     assert_eq!(client.get_project_count(), 1);
+}
+
+#[test]
+fn test_get_allowed_tokens_returns_paginated_allowlist() {
+    let (env, _admin, token_a) = create_test_env();
+    let token_b_admin = Address::generate(&env);
+    let token_b = env.register_stellar_asset_contract(token_b_admin);
+    let token_c_admin = Address::generate(&env);
+    let token_c = env.register_stellar_asset_contract(token_c_admin);
+
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+    client.allow_token(&admin, &token_a);
+    client.allow_token(&admin, &token_b);
+    client.allow_token(&admin, &token_c);
+
+    assert_eq!(
+        client.get_allowed_tokens(&0, &10),
+        Vec::from_slice(&env, &[token_a.clone(), token_b.clone(), token_c.clone()])
+    );
+    assert_eq!(
+        client.get_allowed_tokens(&1, &1),
+        Vec::from_slice(&env, &[token_b.clone()])
+    );
+
+    client.disallow_token(&admin, &token_b);
+
+    assert_eq!(
+        client.get_allowed_tokens(&0, &10),
+        Vec::from_slice(&env, &[token_a, token_c])
+    );
 }
 
 // ============================================================
@@ -1032,36 +1066,33 @@ fn test_deposit_emits_deposit_received_event() {
     token_client.mint(&funder, &amount);
     client.deposit(&project_id, &funder, &amount);
 
-    // Verify balance was credited correctly
+    // Verify balance was credited correctly.
     assert_eq!(client.get_balance(&project_id), amount);
 
-    // Verify that exactly two relevant events were emitted:
-    // 1) project_created  2) deposit_received (with updated project balance)
-    let expected_events = vec![
-        (
-            contract_id.clone(),
-            Vec::from_slice(
-                &env,
-                &[
-                    Symbol::new(&env, "project_created"),
-                    project_id.clone(),
-                ],
-            ),
-            owner.clone(),
-        ),
-        (
-            contract_id.clone(),
-            Vec::from_slice(
-                &env,
-                &[
-                    Symbol::new(&env, "deposit_received"),
-                    project_id.clone(),
-                ],
-            ),
-            (funder.clone(), amount, amount),
-        ),
-    ];
-    assert_eq!(env.events().all(), expected_events);
+    // Soroban host and token operations may emit additional events; assert that
+    // contract-level project and deposit events are present with expected data.
+    let all_events = env.events().all();
+    let expected_project_event = (
+        contract_id.clone(),
+        vec![
+            &env,
+            Symbol::new(&env, "project_created").into_val(&env),
+            project_id.clone().into_val(&env),
+        ],
+        owner.clone().into_val(&env),
+    );
+    let expected_deposit_event = (
+        contract_id.clone(),
+        vec![
+            &env,
+            Symbol::new(&env, "deposit_received").into_val(&env),
+            project_id.clone().into_val(&env),
+        ],
+        (funder.clone(), amount, amount).into_val(&env),
+    );
+
+    assert!(all_events.contains(expected_project_event));
+    assert!(all_events.contains(expected_deposit_event));
 }
 
 // ============================================================
@@ -1155,7 +1186,7 @@ fn test_get_claimable_after_distribution() {
 
 #[test]
 fn test_pause_distributions_requires_admin() {
-    let (env, _admin, token) = create_test_env();
+    let (env, _admin, _token) = create_test_env();
     let contract_id = env.register_contract(None, SplitNairaContract);
     let client = SplitNairaContractClient::new(&env, &contract_id);
 
@@ -1167,7 +1198,7 @@ fn test_pause_distributions_requires_admin() {
 
 #[test]
 fn test_pause_and_unpause_distributions() {
-    let (env, _admin, token) = create_test_env();
+    let (env, _admin, _token) = create_test_env();
     let contract_id = env.register_contract(None, SplitNairaContract);
     let client = SplitNairaContractClient::new(&env, &contract_id);
 
@@ -1216,7 +1247,14 @@ fn test_distribute_fails_when_paused() {
     );
 
     // Deposit funds
-    deposit_to_project(&env, &client, &token, &project_id, &funder, 1000_0000000i128);
+    deposit_to_project(
+        &env,
+        &client,
+        &token,
+        &project_id,
+        &funder,
+        1000_0000000i128,
+    );
     assert_eq!(client.get_balance(&project_id), 1000_0000000i128);
 
     // Pause distributions
@@ -1433,6 +1471,247 @@ fn test_update_project_metadata_emits_event() {
 }
 
 // ============================================================
+//  ISSUE #172 - UPGRADE-SAFETY REGRESSION TESTS
+// ============================================================
+
+#[test]
+fn test_upgrade_regression_pagination_views_remain_aligned_after_project_mutations() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let expected_ids = Vec::from_slice(
+        &env,
+        &[
+            Symbol::new(&env, "rg_page_0"),
+            Symbol::new(&env, "rg_page_1"),
+            Symbol::new(&env, "rg_page_2"),
+            Symbol::new(&env, "rg_page_3"),
+            Symbol::new(&env, "rg_page_4"),
+        ],
+    );
+
+    for (id, title) in [
+        ("rg_page_0", "Page Zero"),
+        ("rg_page_1", "Page One"),
+        ("rg_page_2", "Page Two"),
+        ("rg_page_3", "Page Three"),
+        ("rg_page_4", "Page Four"),
+    ] {
+        client.create_project(
+            &owner,
+            &Symbol::new(&env, id),
+            &String::from_str(&env, title),
+            &String::from_str(&env, "music"),
+            &token,
+            &collabs,
+        );
+    }
+
+    // Mutations should never reshuffle or drop IDs from the pagination index.
+    client.update_project_metadata(
+        &Symbol::new(&env, "rg_page_1"),
+        &owner,
+        &String::from_str(&env, "Page One Renamed"),
+        &String::from_str(&env, "podcast"),
+    );
+    client.lock_project(&Symbol::new(&env, "rg_page_2"), &owner);
+    deposit_to_project(
+        &env,
+        &client,
+        &token,
+        &Symbol::new(&env, "rg_page_3"),
+        &funder,
+        25i128,
+    );
+    client.distribute(&Symbol::new(&env, "rg_page_3"));
+
+    assert_eq!(client.get_project_count(), 5);
+    assert_eq!(client.get_project_ids(&0, &10), expected_ids.clone());
+    assert_eq!(client.get_project_ids(&5, &10), Vec::<Symbol>::new(&env));
+    assert_eq!(client.list_projects(&0, &0).len(), 0);
+
+    for (start, limit, expected_len) in [(0u32, 2u32, 2u32), (1, 3, 3), (3, 5, 2), (4, 1, 1)] {
+        let ids = client.get_project_ids(&start, &limit);
+        let projects = client.list_projects(&start, &limit);
+
+        assert_eq!(ids.len(), expected_len);
+        assert_eq!(projects.len(), expected_len);
+
+        for i in 0..expected_len {
+            assert_eq!(projects.get(i).unwrap().project_id, ids.get(i).unwrap());
+        }
+    }
+
+    let renamed = client
+        .list_projects(&1, &1)
+        .get(0u32)
+        .unwrap();
+    assert_eq!(renamed.project_id, Symbol::new(&env, "rg_page_1"));
+    assert_eq!(renamed.title, String::from_str(&env, "Page One Renamed"));
+
+    let distributed = client
+        .list_projects(&3, &1)
+        .get(0u32)
+        .unwrap();
+    assert_eq!(distributed.project_id, Symbol::new(&env, "rg_page_3"));
+    assert_eq!(distributed.distribution_round, 1);
+    assert_eq!(distributed.total_distributed, 25i128);
+}
+
+#[test]
+fn test_upgrade_regression_metadata_updates_only_mutate_metadata_fields() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[6000u32, 4000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "rg_meta");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Original Metadata"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    deposit_to_project(&env, &client, &token, &project_id, &funder, 100i128);
+    client.distribute(&project_id);
+
+    let before = client.get_project(&project_id).unwrap();
+    let alice_claimed_before = client.get_claimed(&project_id, &alice);
+    let bob_claimed_before = client.get_claimed(&project_id, &bob);
+
+    client.update_project_metadata(
+        &project_id,
+        &owner,
+        &String::from_str(&env, "Updated Metadata"),
+        &String::from_str(&env, "film"),
+    );
+
+    let after = client.get_project(&project_id).unwrap();
+    assert_eq!(after.project_id, before.project_id);
+    assert_eq!(after.owner, before.owner);
+    assert_eq!(after.token, before.token);
+    assert_eq!(after.collaborators.len(), before.collaborators.len());
+    for i in 0..before.collaborators.len() {
+        let before_collab = before.collaborators.get(i).unwrap();
+        let after_collab = after.collaborators.get(i).unwrap();
+        assert_eq!(after_collab.address, before_collab.address);
+        assert_eq!(after_collab.alias, before_collab.alias);
+        assert_eq!(after_collab.basis_points, before_collab.basis_points);
+    }
+    assert_eq!(after.locked, before.locked);
+    assert_eq!(after.total_distributed, before.total_distributed);
+    assert_eq!(after.distribution_round, before.distribution_round);
+    assert_eq!(after.title, String::from_str(&env, "Updated Metadata"));
+    assert_eq!(after.project_type, String::from_str(&env, "film"));
+    assert_eq!(client.get_claimed(&project_id, &alice), alice_claimed_before);
+    assert_eq!(client.get_claimed(&project_id, &bob), bob_claimed_before);
+    assert_eq!(client.get_balance(&project_id), 0);
+
+    client.lock_project(&project_id, &owner);
+    let locked_before_failed_update = client.get_project(&project_id).unwrap();
+    let result = client.try_update_project_metadata(
+        &project_id,
+        &owner,
+        &String::from_str(&env, "Should Not Apply"),
+        &String::from_str(&env, "art"),
+    );
+    assert_eq!(result, Err(Ok(SplitError::ProjectLocked)));
+    assert_eq!(
+        client.get_project(&project_id).unwrap().title,
+        locked_before_failed_update.title
+    );
+    assert_eq!(
+        client.get_project(&project_id).unwrap().project_type,
+        locked_before_failed_update.project_type
+    );
+}
+
+#[test]
+fn test_upgrade_regression_distribution_preserves_rounding_and_accounting_invariants() {
+    let (env, _token_admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone(), carol.clone()]),
+        Vec::from_slice(&env, &[3333u32, 3333u32, 3334u32]),
+    );
+
+    let project_id = Symbol::new(&env, "rg_payout");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Regression Payout"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    // Round 1: last collaborator receives the rounding remainder.
+    deposit_to_project(&env, &client, &token, &project_id, &funder, 101i128);
+    client.distribute(&project_id);
+
+    // Round 2: repeat with a different uneven amount to prove invariants hold
+    // across rounds rather than for a single lucky deposit size.
+    deposit_to_project(&env, &client, &token, &project_id, &funder, 10_003i128);
+    client.distribute(&project_id);
+
+    let token_balance = token::Client::new(&env, &token);
+    assert_eq!(token_balance.balance(&alice), 3_366i128);
+    assert_eq!(token_balance.balance(&bob), 3_366i128);
+    assert_eq!(token_balance.balance(&carol), 3_372i128);
+
+    let alice_info = client.get_claimable(&project_id, &alice);
+    let bob_info = client.get_claimable(&project_id, &bob);
+    let carol_info = client.get_claimable(&project_id, &carol);
+    let project = client.get_project(&project_id).unwrap();
+
+    assert_eq!(alice_info.claimed, 3_366i128);
+    assert_eq!(bob_info.claimed, 3_366i128);
+    assert_eq!(carol_info.claimed, 3_372i128);
+    assert_eq!(alice_info.distribution_round, 2);
+    assert_eq!(bob_info.distribution_round, 2);
+    assert_eq!(carol_info.distribution_round, 2);
+    assert_eq!(project.distribution_round, 2);
+    assert_eq!(project.total_distributed, 10_104i128);
+    assert_eq!(
+        alice_info.claimed + bob_info.claimed + carol_info.claimed,
+        project.total_distributed
+    );
+    assert_eq!(client.get_balance(&project_id), 0);
+}
+
+// ============================================================
 //  project_exists QUERY TESTS
 // ============================================================
 
@@ -1474,6 +1753,54 @@ fn test_project_exists_returns_false_for_missing_project() {
         client.project_exists(&Symbol::new(&env, "does_not_exist")),
         false
     );
+}
+
+#[test]
+fn test_refresh_project_storage_succeeds_for_existing_project() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "refreshable");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Refreshable"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    // Create claimed entries so refresh covers project-scoped payout ledgers too.
+    deposit_to_project(&env, &client, &token, &project_id, &funder, 100_0000000i128);
+    client.distribute(&project_id);
+
+    client.refresh_project_storage(&project_id);
+
+    let info = client.get_claimable(&project_id, &alice);
+    assert_eq!(info.distribution_round, 1);
+    assert_eq!(client.get_claimed(&project_id, &alice), 50_0000000i128);
+    assert_eq!(client.get_claimed(&project_id, &bob), 50_0000000i128);
+}
+
+#[test]
+fn test_refresh_project_storage_fails_for_missing_project() {
+    let (env, _admin, _token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let result = client.try_refresh_project_storage(&Symbol::new(&env, "missing_refresh"));
+    assert_eq!(result, Err(Ok(SplitError::NotFound)));
 }
 
 // ============================================================
@@ -1586,4 +1913,514 @@ fn test_withdraw_unallocated_fails_with_invalid_amount() {
 
     let result = client.try_withdraw_unallocated(&contract_admin, &token, &recovery_to, &0i128);
     assert_eq!(result, Err(Ok(SplitError::InvalidAmount)));
+}
+
+// ============================================================
+//  END-TO-END PERMISSION & LOCK LIFECYCLE TESTS
+//
+//  These tests document, in narrative form, the permission and
+//  lock rules the contract enforces. Each test reads top-to-bottom
+//  like a spec: the setup states the actors, each call states the
+//  intent, and the assertion states the rule being enforced.
+//
+//  Layers exercised:
+//    - Contract rules for owner gating (Unauthorized)
+//    - Contract rules for lock gating (ProjectLocked / AlreadyLocked)
+//    - Full lifecycle ordering (create -> edit -> lock -> reject)
+// ============================================================
+
+/// Walks the full permission lifecycle of a project in one test so the
+/// rules read as a single story:
+///   1. Owner creates the project
+///   2. Owner edits collaborators while unlocked        -> allowed
+///   3. Owner edits metadata while unlocked             -> allowed
+///   4. Owner locks the project                         -> allowed
+///   5. Owner tries to edit collaborators after lock    -> ProjectLocked
+///   6. Owner tries to edit metadata after lock         -> ProjectLocked
+///   7. Owner tries to lock again                       -> AlreadyLocked
+#[test]
+fn test_lifecycle_pre_lock_edit_lock_post_lock_reject() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let project_id = Symbol::new(&env, "lifecycle");
+
+    // 1. Owner creates the project.
+    let initial_collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[6000u32, 4000u32]),
+    );
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Lifecycle Project"),
+        &String::from_str(&env, "music"),
+        &token,
+        &initial_collabs,
+    );
+
+    // 2. Owner edits collaborators while unlocked — allowed.
+    let updated_collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone(), carol.clone()]),
+        Vec::from_slice(&env, &[5000u32, 3000u32, 2000u32]),
+    );
+    client.update_collaborators(&project_id, &owner, &updated_collabs);
+    let after_edit = client.get_project(&project_id).unwrap();
+    assert_eq!(after_edit.collaborators.len(), 3);
+    assert_eq!(after_edit.locked, false);
+
+    // 3. Owner edits metadata while unlocked — allowed.
+    client.update_project_metadata(
+        &project_id,
+        &owner,
+        &String::from_str(&env, "Lifecycle Project (renamed)"),
+        &String::from_str(&env, "film"),
+    );
+    let after_metadata = client.get_project(&project_id).unwrap();
+    assert_eq!(
+        after_metadata.title,
+        String::from_str(&env, "Lifecycle Project (renamed)")
+    );
+    assert_eq!(after_metadata.project_type, String::from_str(&env, "film"));
+
+    // 4. Owner locks the project — allowed.
+    client.lock_project(&project_id, &owner);
+    let locked = client.get_project(&project_id).unwrap();
+    assert_eq!(locked.locked, true);
+
+    // 5. Owner tries to edit collaborators after lock — ProjectLocked.
+    let post_lock_collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[7000u32, 3000u32]),
+    );
+    let collab_result = client.try_update_collaborators(&project_id, &owner, &post_lock_collabs);
+    assert_eq!(collab_result, Err(Ok(SplitError::ProjectLocked)));
+
+    // 6. Owner tries to edit metadata after lock — ProjectLocked.
+    let metadata_result = client.try_update_project_metadata(
+        &project_id,
+        &owner,
+        &String::from_str(&env, "Tampered Title"),
+        &String::from_str(&env, "art"),
+    );
+    assert_eq!(metadata_result, Err(Ok(SplitError::ProjectLocked)));
+
+    // 7. Owner tries to lock again — AlreadyLocked.
+    let relock_result = client.try_lock_project(&project_id, &owner);
+    assert_eq!(relock_result, Err(Ok(SplitError::AlreadyLocked)));
+}
+
+/// Non-owner cannot lock a project. Contract returns Unauthorized
+/// before the signature check has any effect.
+#[test]
+fn test_non_owner_cannot_lock_project() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let not_owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let project_id = Symbol::new(&env, "lock_unauth");
+
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Lock Unauthorized"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    // Attacker attempts to lock — must be rejected.
+    let result = client.try_lock_project(&project_id, &not_owner);
+    assert_eq!(result, Err(Ok(SplitError::Unauthorized)));
+
+    // And the project must still be unlocked afterwards.
+    let project = client.get_project(&project_id).unwrap();
+    assert_eq!(project.locked, false);
+}
+
+/// Non-owner cannot update collaborators. Contract returns Unauthorized.
+#[test]
+fn test_non_owner_cannot_update_collaborators() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let not_owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let project_id = Symbol::new(&env, "collab_unauth");
+
+    let original_collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Collab Unauthorized"),
+        &String::from_str(&env, "music"),
+        &token,
+        &original_collabs,
+    );
+
+    // Attacker-chosen collaborator set — should never be applied.
+    let attacker_collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob, carol]),
+        Vec::from_slice(&env, &[1000u32, 1000u32, 8000u32]),
+    );
+    let result = client.try_update_collaborators(&project_id, &not_owner, &attacker_collabs);
+    assert_eq!(result, Err(Ok(SplitError::Unauthorized)));
+
+    // And the original collaborator set must be intact.
+    let project = client.get_project(&project_id).unwrap();
+    assert_eq!(project.collaborators.len(), 2);
+    assert_eq!(
+        project.collaborators.get(0u32).unwrap().basis_points,
+        5000u32
+    );
+    assert_eq!(
+        project.collaborators.get(1u32).unwrap().basis_points,
+        5000u32
+    );
+}
+
+// ============================================================
+//  ISSUE #170 — RELEASE-GRADE ADMIN/PAUSE/RECOVERY INTEGRATION TESTS
+// ============================================================
+
+#[test]
+fn test_admin_rotation_pause_allowlist_and_recovery_preserve_project_invariants() {
+    let (env, _token_admin, token_allowed) = create_test_env();
+    let blocked_token_admin = Address::generate(&env);
+    let token_blocked = env.register_stellar_asset_contract(blocked_token_admin);
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let admin_a = Address::generate(&env);
+    let admin_b = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let funder = Address::generate(&env);
+    let donor = Address::generate(&env);
+    let recovery_to = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    // Set and rotate admin, then verify only rotated admin has control.
+    client.set_admin(&admin_a);
+    client.set_admin(&admin_b);
+    assert_eq!(client.get_admin().unwrap(), admin_b.clone());
+    assert_eq!(
+        client.try_allow_token(&admin_a, &token_allowed),
+        Err(Ok(SplitError::Unauthorized))
+    );
+
+    // Enable allowlist and permit only token_allowed.
+    client.allow_token(&admin_b, &token_allowed);
+    assert_eq!(client.get_allowed_token_count(), 1);
+    assert_eq!(client.is_token_allowed(&token_allowed), true);
+    assert_eq!(client.is_token_allowed(&token_blocked), false);
+
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let blocked_result = client.try_create_project(
+        &owner,
+        &Symbol::new(&env, "blocked_allowlist"),
+        &String::from_str(&env, "Blocked Allowlist"),
+        &String::from_str(&env, "music"),
+        &token_blocked,
+        &collabs.clone(),
+    );
+    assert_eq!(blocked_result, Err(Ok(SplitError::TokenNotAllowed)));
+
+    let project_id = Symbol::new(&env, "ops_invariants");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Ops Invariants"),
+        &String::from_str(&env, "music"),
+        &token_allowed,
+        &collabs,
+    );
+
+    // Deposit project funds, then pause distributions.
+    deposit_to_project(
+        &env,
+        &client,
+        &token_allowed,
+        &project_id,
+        &funder,
+        1_000_0000000i128,
+    );
+    let balance_before_pause = client.get_balance(&project_id);
+    client.pause_distributions(&admin_b);
+    assert_eq!(client.is_distributions_paused(), true);
+    assert_eq!(
+        client.try_distribute(&project_id),
+        Err(Ok(SplitError::DistributionsPaused))
+    );
+    // Invariant: pause cannot mutate accounted project balances/round metadata.
+    assert_eq!(client.get_balance(&project_id), balance_before_pause);
+    assert_eq!(client.get_project(&project_id).unwrap().distribution_round, 0);
+
+    // Send unallocated funds and recover some without affecting project ledger.
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_allowed);
+    token_admin_client.mint(&donor, &300_0000000i128);
+    let token_client = token::Client::new(&env, &token_allowed);
+    token_client.transfer(&donor, &contract_id, &300_0000000i128);
+    assert_eq!(client.get_unallocated_balance(&token_allowed), 300_0000000i128);
+    client.withdraw_unallocated(&admin_b, &token_allowed, &recovery_to, &200_0000000i128);
+    assert_eq!(client.get_balance(&project_id), balance_before_pause);
+    assert_eq!(token_client.balance(&recovery_to), 200_0000000i128);
+
+    // Unpause and distribute to prove project flow still behaves correctly.
+    client.unpause_distributions(&admin_b);
+    client.distribute(&project_id);
+    let project = client.get_project(&project_id).unwrap();
+    assert_eq!(project.distribution_round, 1);
+    assert_eq!(project.total_distributed, 1_000_0000000i128);
+    assert_eq!(client.get_balance(&project_id), 0);
+}
+
+// ============================================================
+//  ISSUE #245 — transfer_project_ownership TESTS
+// ============================================================
+
+#[test]
+fn test_transfer_ownership_success() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "transfer_ok");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Transfer OK"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    client.transfer_project_ownership(&project_id, &owner, &new_owner);
+
+    let project = client.get_project(&project_id).unwrap();
+    assert_eq!(project.owner, new_owner);
+}
+
+#[test]
+fn test_transfer_ownership_fails_for_non_owner() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "transfer_unauth");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Transfer Unauth"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    let result = client.try_transfer_project_ownership(&project_id, &attacker, &new_owner);
+    assert_eq!(result, Err(Ok(SplitError::Unauthorized)));
+
+    // Ownership must be unchanged.
+    let project = client.get_project(&project_id).unwrap();
+    assert_eq!(project.owner, owner);
+}
+
+#[test]
+fn test_transfer_ownership_fails_for_missing_project() {
+    let (env, _admin, _token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+
+    let result = client.try_transfer_project_ownership(
+        &Symbol::new(&env, "ghost_project"),
+        &owner,
+        &new_owner,
+    );
+    assert_eq!(result, Err(Ok(SplitError::NotFound)));
+}
+
+#[test]
+fn test_transfer_ownership_works_on_locked_project() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[7000u32, 3000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "transfer_locked");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Transfer Locked"),
+        &String::from_str(&env, "film"),
+        &token,
+        &collabs,
+    );
+
+    // Lock the project first.
+    client.lock_project(&project_id, &owner);
+    assert_eq!(client.get_project(&project_id).unwrap().locked, true);
+
+    // Ownership transfer must succeed even for locked projects.
+    client.transfer_project_ownership(&project_id, &owner, &new_owner);
+    let project = client.get_project(&project_id).unwrap();
+    assert_eq!(project.owner, new_owner);
+    assert_eq!(project.locked, true);
+}
+
+#[test]
+fn test_new_owner_can_exercise_owner_gated_actions() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone()]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "new_owner_acts");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "New Owner Acts"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    client.transfer_project_ownership(&project_id, &owner, &new_owner);
+
+    // New owner can update metadata.
+    client.update_project_metadata(
+        &project_id,
+        &new_owner,
+        &String::from_str(&env, "Renamed By New Owner"),
+        &String::from_str(&env, "podcast"),
+    );
+    let project = client.get_project(&project_id).unwrap();
+    assert_eq!(project.title, String::from_str(&env, "Renamed By New Owner"));
+
+    // New owner can update collaborators.
+    let new_collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice.clone(), bob.clone(), carol.clone()]),
+        Vec::from_slice(&env, &[4000u32, 3000u32, 3000u32]),
+    );
+    client.update_collaborators(&project_id, &new_owner, &new_collabs);
+    assert_eq!(client.get_project(&project_id).unwrap().collaborators.len(), 3);
+
+    // New owner can lock.
+    client.lock_project(&project_id, &new_owner);
+    assert_eq!(client.get_project(&project_id).unwrap().locked, true);
+
+    // Old owner can no longer perform owner-gated actions.
+    let old_owner_result = client.try_update_project_metadata(
+        &project_id,
+        &owner,
+        &String::from_str(&env, "Old Owner Attempt"),
+        &String::from_str(&env, "art"),
+    );
+    assert_eq!(old_owner_result, Err(Ok(SplitError::Unauthorized)));
+}
+
+#[test]
+fn test_transfer_ownership_emits_event() {
+    let (env, _admin, token) = create_test_env();
+    let contract_id = env.register_contract(None, SplitNairaContract);
+    let client = SplitNairaContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let collabs = make_collaborators(
+        &env,
+        Vec::from_slice(&env, &[alice, bob]),
+        Vec::from_slice(&env, &[5000u32, 5000u32]),
+    );
+
+    let project_id = Symbol::new(&env, "transfer_evt");
+    client.create_project(
+        &owner,
+        &project_id,
+        &String::from_str(&env, "Transfer Event"),
+        &String::from_str(&env, "music"),
+        &token,
+        &collabs,
+    );
+
+    // Consume events before the transfer so we can check for a new one.
+    let before_count = env.events().all().len();
+    client.transfer_project_ownership(&project_id, &owner, &new_owner);
+    assert!(env.events().all().len() > before_count);
 }

@@ -3,13 +3,19 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
-import rateLimit from "express-rate-limit";
-
+import swaggerUi from "swagger-ui-express";
 import { healthRouter } from "./routes/health.js";
 import { splitsRouter } from "./routes/splits.js";
 import { docsRouter } from "./routes/docs.js";
+import { usersRouter } from "./routes/users.js";
+import { transactionsRouter } from "./routes/transactions.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
+import { globalLimiter, readLimiter, writeLimiter, adminLimiter, authLimiter } from "./middleware/rate-limit.js";
+import { validateEnv, printEnvDiagnostics } from "./config/env.js";
+import { initDatabase, closeDatabase } from "./services/database.js";
+import { logger } from "./services/logger.js";
+import { generateOpenApi } from "./openapi.js";
 
 dotenv.config();
 
@@ -23,25 +29,13 @@ const corsOrigins = process.env.CORS_ORIGIN
 
 const corsOrigin = corsOrigins.length > 0 ? corsOrigins : false;
 
-const publicLimiter = rateLimit({
-  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000),
-  limit: Number(process.env.RATE_LIMIT_MAX ?? 100),
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    const requestId = res.locals.requestId;
-    res.status(429).json({
-      error: "rate_limited",
-      message: "Too many requests.",
-      requestId
-    });
-  }
-});
-
 app.use(helmet());
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: "1mb" }));
 app.use(requestIdMiddleware);
+
+// Global safety-net — must run before all route-specific limiters (#290)
+app.use(globalLimiter);
 
 // Swagger UI needs inline scripts/styles — relax CSP only for /docs
 app.use("/docs", (_req, res, next) => {
@@ -51,6 +45,7 @@ app.use("/docs", (_req, res, next) => {
   );
   next();
 });
+
 app.use(
   morgan((tokens, req, res) => {
     const requestId = res.locals.requestId ?? req.header("x-request-id") ?? "-";
@@ -67,7 +62,20 @@ app.use(
   })
 );
 
-app.use(["/health", "/splits"], publicLimiter);
+app.use("/health", readLimiter);
+app.use("/splits/admin", adminLimiter);
+app.use("/splits", (req, res, next) => {
+  if (req.method === "GET") return readLimiter(req, res, next);
+  return writeLimiter(req, res, next);
+});
+// Auth endpoints get a stricter per-IP limiter to block credential stuffing
+app.use("/users/register", authLimiter);
+app.use("/users/login", authLimiter);
+app.use("/users", (req, res, next) => {
+  if (req.method === "GET") return readLimiter(req, res, next);
+  return writeLimiter(req, res, next);
+});
+app.use("/transactions", readLimiter);
 
 app.get("/", (_req, res) => {
   res.json({
@@ -80,36 +88,71 @@ app.get("/", (_req, res) => {
 app.use("/health", healthRouter);
 app.use("/splits", splitsRouter);
 app.use("/docs", docsRouter);
+app.use("/users", usersRouter);
+app.use("/transactions", transactionsRouter);
+
+// ─── OpenAPI & Swagger Documentation ──────────────────────────────────────────
+
+// Serve OpenAPI spec as JSON
+app.get("/api/openapi.json", (_req, res) => {
+  const spec = generateOpenApi();
+  res.json(spec);
+});
+
+// Serve Swagger UI at /api/docs
+const swaggerOptions = {
+  customCss: ".swagger-ui .topbar { display: none }",
+  customSiteTitle: "SplitNaira API Documentation",
+  swaggerOptions: {
+    url: "/api/openapi.json",
+    displayOperationId: true,
+    filter: true,
+    showExtensions: true,
+  },
+};
+
+app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(null, swaggerOptions));
+
+// Redirect /api/docs/ to /api/docs
+app.get("/api/docs/", (_req, res) => {
+  res.redirect("/api/docs");
+});
 
 app.use(notFoundHandler);
 app.use(errorHandler);
 
 if (process.env.NODE_ENV !== "test") {
-  // Startup wrapper to allow clean fatal handling
   const start = async () => {
     try {
+      if (process.env.NODE_ENV !== "production") {
+        printEnvDiagnostics();
+      }
+      validateEnv();
+
+      await initDatabase();
+
       const port = Number(process.env.PORT ?? 3001);
       const server = app.listen(port, () => {
-        console.log(`[startup] SplitNaira API listening on :${port}`);
+        logger.info(`Server started on port ${port}`);
       });
 
       // Graceful shutdown
-      const shutdown = (signal: NodeJS.Signals) => {
-        console.log(`[shutdown] Received ${signal}. Closing server...`);
-        // Stop accepting new connections and wait for in-flight to complete
+      const shutdown = async (signal: NodeJS.Signals) => {
+        logger.info(`Received ${signal}. Shutting down...`);
+        await closeDatabase();
         server.close((err?: Error) => {
           if (err) {
-            console.error("[shutdown] Error during server close:", err);
+            logger.error("Error during server close", { error: err });
             process.exit(1);
           }
-          console.log("[shutdown] Server closed cleanly. Exiting.");
+          logger.info("Server closed cleanly");
           process.exit(0);
         });
 
         // Fallback: force exit after timeout
         const forceTimeoutMs = Number(process.env.SHUTDOWN_FORCE_TIMEOUT_MS ?? 10_000);
         setTimeout(() => {
-          console.warn("[shutdown] Force exiting after timeout.");
+          logger.warn("Force exiting after timeout");
           process.exit(1);
         }, forceTimeoutMs).unref();
       };
@@ -119,21 +162,18 @@ if (process.env.NODE_ENV !== "test") {
 
       // Fatal error handlers
       process.on("unhandledRejection", (reason) => {
-        console.error("[fatal] Unhandled promise rejection:", reason);
-        // Exit to allow orchestrator to restart
+        logger.error("Unhandled promise rejection", { reason });
         process.exit(1);
       });
       process.on("uncaughtException", (err) => {
-        console.error("[fatal] Uncaught exception:", err);
+        logger.error("Uncaught exception", { error: err });
         process.exit(1);
       });
     } catch (err) {
-      console.error("[startup] Failed to start server:", err);
+      logger.error("Failed to start server", { error: err });
       process.exit(1);
     }
   };
-  // Immediately invoke
   // eslint-disable-next-line @typescript-eslint/no-floating-promises
   start();
 }
-
