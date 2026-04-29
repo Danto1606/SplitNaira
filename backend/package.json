@@ -26,11 +26,11 @@
     "helmet": "8.0.0",
     "morgan": "1.10.0",
     "pg": "^8.11.3",
-    "swagger-ui-express": "^5.0.0",
+    "swagger-ui-express": "5.0.1",
     "typeorm": "^0.3.19",
     "winston": "^3.11.0",
     "yaml": "^2.8.3",
-    "zod": "^4.3.6"
+    "zod": "3.24.2"
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",
@@ -40,7 +40,7 @@
     "@types/node": "22.13.9",
     "@types/pg": "^8.10.9",
     "@types/supertest": "6.0.2",
-    "@types/swagger-ui-express": "^4.1.6",
+    "@types/swagger-ui-express": "4.1.8",
     "@typescript-eslint/eslint-plugin": "8.57.0",
     "@typescript-eslint/parser": "8.57.0",
     "eslint": "9.39.4",
