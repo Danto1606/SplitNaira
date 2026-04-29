@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -15,7 +16,6 @@ import { globalLimiter, readLimiter, writeLimiter, adminLimiter, authLimiter } f
 import { validateEnv, printEnvDiagnostics } from "./config/env.js";
 import { initDatabase, closeDatabase } from "./services/database.js";
 import { logger } from "./services/logger.js";
-import { generateOpenApi } from "./openapi.js";
 
 dotenv.config();
 
@@ -94,9 +94,14 @@ app.use("/transactions", transactionsRouter);
 // ─── OpenAPI & Swagger Documentation ──────────────────────────────────────────
 
 // Serve OpenAPI spec as JSON
-app.get("/api/openapi.json", (_req, res) => {
-  const spec = generateOpenApi();
-  res.json(spec);
+app.get("/api/openapi.json", async (_req, res, next) => {
+  try {
+    const { generateOpenApi } = await import("./openapi.js");
+    const spec = generateOpenApi();
+    res.json(spec);
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Serve Swagger UI at /api/docs
