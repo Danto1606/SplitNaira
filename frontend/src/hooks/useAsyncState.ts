@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/exhaustive-deps */
 
 /**
  * Hook for async operations with consistent loading/error/stale state (#293).
@@ -84,12 +85,10 @@ export function useAsyncState<T>(
       });
 
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  }, deps);
 
   useEffect(() => {
     return run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
   return { data, isLoading, isStale, error, execute: run };

@@ -61,7 +61,7 @@ export async function executeWithRetry<T>(
         setTimeout(() => reject(new RpcTimeoutError()), timeoutMs)
       );
 
-      return await Promise.race([operation(), timeoutPromise]);
+      return Promise.race([operation(), timeoutPromise]);
     } catch (error) {
       lastError = error as Error;
 

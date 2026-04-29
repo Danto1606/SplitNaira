@@ -1,5 +1,7 @@
 import type { SplitProject } from "./stellar";
 import { getEnv } from "./env";
+import type { SplitProject } from "./stellar";
+import { getEnv } from "./env";
 
 const API_BASE_URL = getEnv().NEXT_PUBLIC_API_BASE_URL;
 
@@ -250,6 +252,30 @@ export async function getAdminStatus(): Promise<AdminStatusState> {
   return requestJson<AdminStatusState>(
     "/splits/admin/status",
     "Failed to fetch admin status"
+  );
+}
+
+export async function buildPauseDistributionsXdr(admin: string): Promise<BuildSplitResponse> {
+  return requestJson<BuildSplitResponse>(
+    "/splits/admin/pause-distributions",
+    "Failed to build pause transaction",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin })
+    }
+  );
+}
+
+export async function buildUnpauseDistributionsXdr(admin: string): Promise<BuildSplitResponse> {
+  return requestJson<BuildSplitResponse>(
+    "/splits/admin/unpause-distributions",
+    "Failed to build unpause transaction",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin })
+    }
   );
 }
 
