@@ -28,6 +28,10 @@ This runbook describes the end-to-end release/upgrade path for the `contracts/` 
    - `npm run generate:contract-interface`
    - `npm run generate:contract-types`
    - Review the JSON and generated TypeScript diffs before release sign-off.
+1. `rustup target add wasm32v1-none` (one-time)
+2. `cargo build --release --target wasm32v1-none`
+3. `wasm-bindgen` is not required for Soroban contracts.
+4. Verify artifact path: `contracts/target/wasm32v1-none/release/splitnaira_contract.wasm`
 
 ## 4. Run contract-level testing
 - Unit test suite in `contracts/tests.rs` includes behavior, edge cases, event emission.
