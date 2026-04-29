@@ -1,6 +1,5 @@
 import type { SplitProject } from "./stellar";
-import { getEnv } from "./env";
-import type { SplitProject } from "./stellar";
+import type { Collaborator } from "../generated/contract-types.js";
 import { getEnv } from "./env";
 
 const API_BASE_URL = getEnv().NEXT_PUBLIC_API_BASE_URL;
@@ -11,11 +10,7 @@ export interface CreateSplitPayload {
   title: string;
   projectType: string;
   token: string;
-  collaborators: Array<{
-    address: string;
-    alias: string;
-    basisPoints: number;
-  }>;
+  collaborators: Array<Collaborator>;
 }
 
 export interface ProjectHistoryItem {
@@ -84,7 +79,7 @@ export async function buildCreateSplitXdr(
   return requestJson<BuildSplitResponse>("/splits", "Failed to build split transaction", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }
 
@@ -98,7 +93,7 @@ export async function buildDistributeXdr(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceAddress })
+      body: JSON.stringify({ sourceAddress }),
     }
   );
 }
@@ -113,7 +108,7 @@ export async function buildLockProjectXdr(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner })
+      body: JSON.stringify({ owner }),
     }
   );
 }
@@ -129,7 +124,7 @@ export async function buildDepositXdr(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from, amount })
+      body: JSON.stringify({ from, amount }),
     }
   );
 }
@@ -144,7 +139,7 @@ export async function buildAllowTokenXdr(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ admin, token })
+      body: JSON.stringify({ admin, token }),
     }
   );
 }
@@ -159,7 +154,7 @@ export async function buildDisallowTokenXdr(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ admin, token })
+      body: JSON.stringify({ admin, token }),
     }
   );
 }
@@ -176,7 +171,7 @@ export async function buildUpdateMetadataXdr(
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner, title, projectType })
+      body: JSON.stringify({ owner, title, projectType }),
     }
   );
 }
@@ -184,7 +179,7 @@ export async function buildUpdateMetadataXdr(
 export async function buildUpdateCollaboratorsXdr(
   projectId: string,
   owner: string,
-  collaborators: Array<{ address: string; alias: string; basisPoints: number }>
+  collaborators: Array<Collaborator>
 ): Promise<BuildSplitResponse> {
   return requestJson<BuildSplitResponse>(
     `/splits/${encodeURIComponent(projectId)}/collaborators`,
@@ -192,7 +187,7 @@ export async function buildUpdateCollaboratorsXdr(
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner, collaborators })
+      body: JSON.stringify({ owner, collaborators }),
     }
   );
 }
@@ -255,31 +250,37 @@ export async function getAdminStatus(): Promise<AdminStatusState> {
   );
 }
 
-export async function buildPauseDistributionsXdr(admin: string): Promise<BuildSplitResponse> {
+export async function buildPauseDistributionsXdr(
+  admin: string
+): Promise<BuildSplitResponse> {
   return requestJson<BuildSplitResponse>(
     "/splits/admin/pause-distributions",
     "Failed to build pause transaction",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ admin })
+      body: JSON.stringify({ admin }),
     }
   );
 }
 
-export async function buildUnpauseDistributionsXdr(admin: string): Promise<BuildSplitResponse> {
+export async function buildUnpauseDistributionsXdr(
+  admin: string
+): Promise<BuildSplitResponse> {
   return requestJson<BuildSplitResponse>(
     "/splits/admin/unpause-distributions",
     "Failed to build unpause transaction",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ admin })
+      body: JSON.stringify({ admin }),
     }
   );
 }
 
-export async function isTokenAllowed(token: string): Promise<{ token: string; isAllowed: boolean }> {
+export async function isTokenAllowed(
+  token: string
+): Promise<{ token: string; isAllowed: boolean }> {
   return requestJson<{ token: string; isAllowed: boolean }>(
     `/splits/admin/is-token-allowed?token=${encodeURIComponent(token)}`,
     "Failed to check token allowlist status"
@@ -302,7 +303,9 @@ export interface UnallocatedBalanceState {
   unallocated: string;
 }
 
-export async function getUnallocatedBalance(token: string): Promise<UnallocatedBalanceState> {
+export async function getUnallocatedBalance(
+  token: string
+): Promise<UnallocatedBalanceState> {
   return requestJson<UnallocatedBalanceState>(
     `/splits/admin/unallocated?token=${encodeURIComponent(token)}`,
     "Failed to fetch unallocated balance"
@@ -340,7 +343,7 @@ export async function buildWithdrawUnallocatedXdr(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     }
   );
 }
