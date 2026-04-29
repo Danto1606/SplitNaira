@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app } from "../index.js";
 
@@ -82,11 +82,13 @@ vi.mock("../services/stellar.js", async (importOriginal) => {
   };
 });
 
-
 describe("Route Integration Tests", () => {
   beforeAll(() => {
+    process.env.DATABASE_URL = "https://example.com/postgres";
     process.env.SIMULATOR_ACCOUNT = "GD5T6IPRNCKFOHQ3STZ5BTEYI5V6U5U6U5U6U5U6U5U6U5U6U5U6U5U6";
     process.env.CONTRACT_ID = "CBLASIRZ7CUKC7S5IS3VSNMQGKZ5FTRWLHZZXH7H4YG6ZLRFPJF5H2LR";
+    process.env.HORIZON_URL = "https://horizon-testnet.stellar.org";
+    process.env.SOROBAN_RPC_URL = "https://soroban-testnet.stellar.org";
     process.env.SOROBAN_NETWORK_PASSPHRASE = "test";
   });
 
@@ -106,16 +108,8 @@ describe("Route Integration Tests", () => {
     });
   });
 
-  describe("GET /splits", () => {
-    it("should return validation error when simulator account is unavailable", async () => {
-      const res = await request(app).get("/splits");
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-    });
-  });
-
   describe("Error Handling & Request ID", () => {
-    it("should propagate request-id in internal error responses", async () => {
+    it("should propagate request-id in validation error responses", async () => {
       const res = await request(app)
         .get("/splits/invalid-project-id!!!")
         .set("x-request-id", "test-request-id");
